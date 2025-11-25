@@ -1,0 +1,12 @@
+[  
+  {
+    "VcenterFqdn" : "vcenter01.example.com",
+    "VcenterUsername" : "administrator@vsphere.local",
+    "VcenterPassword" : "Password1!"
+  },
+  {
+    "VcenterFqdn" : "vcenter02.example.com",
+    "VcenterUsername" : "administrator@vsphere.local",
+    "VcenterPassword" : "Password1!"
+  }
+]

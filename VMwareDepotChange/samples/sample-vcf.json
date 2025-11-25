@@ -1,0 +1,8 @@
+[
+  {
+    "SddcManagerFqdn" : "vcf01.example.com",
+    "SddcManagerUserName" : "administrator@vsphere.local",
+    "SddcManagerPassword" : "Password1!",
+    "SddcManagerRootPassword" : "Password1!Password1!"
+  }
+]
