@@ -35,7 +35,7 @@ cd VMwareDepotChange
 ## 📚 Prerequisites
 
 - PowerShell 7.x or later
-- VMware PowerCLI module
+- VCF.PowerCLI module
 - Administrative credentials for vCenter or SDDC Manager
 - Broadcom download token (for depot updates)
 
