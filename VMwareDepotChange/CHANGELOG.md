@@ -1,16 +1,16 @@
 ## 1.0.0.0.54
 
-* Removed legacy VMware.PowerCLI 13.3 support (VCF.PowerCLI 9 now required)
-* Added DEBUG log mode
-* Restructed for Strict mode support
+* Removed legacy VMware.PowerCLI 13.3 support (VCF.PowerCLI 9 now required).
+* Added DEBUG log mode.
+* Restructured for Strict mode support.
  
 ## 1.0.0.0.53
 
-* Fixed issue with VCF.PowerCLI 9 support & VCF 9 detection
+* Fixed issue with VCF.PowerCLI 9 support & VCF 9 detection.
 
 ## 1.0.0.0.52 
 
-* Support for VCF.PowerCLI 9 & added -SkipVcenter Feature
+* Support for VCF.PowerCLI 9 & added -SkipVcenter feature.
 
 ## 1.0.0.0.51 
 

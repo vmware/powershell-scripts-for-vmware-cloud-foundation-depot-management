@@ -1,5 +1,8 @@
 # PowerShell Scripts for VMware Cloud Foundation Depot Management
 
+[![License](https://img.shields.io/badge/License-Broadcom-green.svg)](LICENSE.md)
+[![PowerShell](https://img.shields.io/badge/PowerShell-7.2%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
+
 A collection of PowerShell scripts to help manage and configure VMware depot repositories for VMware Cloud Foundation (VCF) and vCenter Server environments.
 
 ## 📋 Overview
@@ -12,7 +15,7 @@ This repository contains utilities for managing the transition to VMware by Broa
 
 Reconfigure customer repositories for SDDC Manager and vCenter to use the new VMware by Broadcom depot structures.
 
-**Location:** `VMwareDepotChange/`
+**Location:** [VMwareDepotChange](https://github.com/vmware/powershell-scripts-for-vmware-cloud-foundation-depot-management/tree/main/VMwareDepotChange)
 
 **Key Features:**
 - Support for standalone vCenter servers
