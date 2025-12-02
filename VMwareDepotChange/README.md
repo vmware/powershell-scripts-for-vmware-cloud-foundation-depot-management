@@ -1,5 +1,9 @@
 # VMware Depot Change Script
 
+[![PowerShell](https://img.shields.io/badge/PowerShell-7.2%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
+[![License](https://img.shields.io/badge/License-Broadcom-green.svg)](LICENSE.md)
+[![Version](https://img.shields.io/badge/Version-1.0.0.0.54-orange.svg)](CHANGELOG.md)
+
 Reconfigure customer repositories for SDDC Manager and vCenter to use the new VMware by Broadcom depot structures with unique URIs.
 
 ## 📋 Table of Contents
@@ -52,7 +56,7 @@ This script helps users transition to the new VMware by Broadcom depot structure
    - Custom depot URLs with download token
    - Version-specific manifest paths
 
-3. **SDDC Manager Depots** (VCF 5.2 and earlier)
+3. **SDDC Manager Depots** (VCF 4.5.x through 5.2.x)
    - LCM manifest directories
    - Product version catalogs
    - Repository configurations
@@ -64,7 +68,7 @@ This script helps users transition to the new VMware by Broadcom depot structure
 - **Administrative credentials** for vCenter or SDDC Manager
   - vCenter: Administrator role required
   - SDDC Manager: ADMIN role required (for credential retrieval)
-- **Broadcom download token** (32 alphanumeric characters) for depot updates
+- **Broadcom download token** for depot updates
 - **Network connectivity** to target systems from script execution host
 
 ## Installation
@@ -77,7 +81,7 @@ This script helps users transition to the new VMware by Broadcom depot structure
 
 2. **Install PowerCLI**
    ```powershell
-   Install-Module -Name VMware.PowerCLI -Scope CurrentUser
+   Install-Module -Name VCF.PowerCLI -Scope CurrentUser
    # Or visit: https://developer.broadcom.com/powercli/installation-guide
    ```
 

@@ -29,8 +29,6 @@
 # DEALINGS IN THE SOFTWARE.
 #
 # =============================================================================
-#
-#
 # Intended use:
 #
 # This script is intended to help users transition to the new VMware by Broadcom depot structures.
@@ -40,19 +38,20 @@
 # KB: https://knowledge.broadcom.com/external/article/389276
 #
 Param (
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$check,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$connect,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [ValidateLength(32, 32)] [ValidatePattern('^[a-zA-Z0-9]{32}$')] [String]$downloadToken,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$disconnect,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$dryRun,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$endpoint,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$help,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$jsonInput,
-    [Parameter (Mandatory = $false)] [ValidateSet("DEBUG", "INFO", "ADVISORY", "WARNING", "EXCEPTION", "ERROR")] [String]$logLevel = "INFO",
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$skipSddcManagerTaskCheck,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$update,
-    [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$version
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$check,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$connect,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [ValidateLength(32, 32)] [ValidatePattern('^[a-zA-Z0-9]{32}$')] [String]$downloadToken,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$disconnect,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$dryRun,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$endpoint,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$help,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$jsonInput,
+    [Parameter(Mandatory = $false)] [ValidateSet("DEBUG", "INFO", "ADVISORY", "WARNING", "EXCEPTION", "ERROR")] [String]$logLevel = "INFO",
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$skipSddcManagerTaskCheck,
+    [Parameter(Mandatory = $false)] [ValidateSet("Enable", "Disable")] [String]$skipVcenter,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$update,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$version
 )
 
 # Enable strict mode for better error detection
@@ -117,7 +116,6 @@ Function Show-PowerCliWebOperationTimeOut {
     return $webRequestTimeOut
 
 }
-
 Function Get-SddcManagerVersion {
     [CmdletBinding()]
     [OutputType([String])]
@@ -218,7 +216,7 @@ Function Show-AnyKey {
     Param()
 
     # function Show-AnyKey is not required in headless mode
-    if ($Headless -eq "disabled") {
+    if ($Script:Headless -eq "disabled") {
         Write-Host "`nPress any key to continue...`n" -ForegroundColor Yellow;
         $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') | Out-Null
     }
@@ -254,9 +252,9 @@ Function Get-VcenterVersion {
     #>
 
     Param (
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$fullVersion,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence,
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$fullVersion,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
     )
 
     $vcenterVersionArray = ($Global:DefaultVIServers | Where-Object { $_.name -eq $vcenter }).Version  -split "\."
@@ -338,12 +336,12 @@ Function Write-LogMessage {
     #>
 
     Param (
-        [Parameter (Mandatory = $false)] [Switch]$appendNewLine,
-        [Parameter (Mandatory = $true)] [AllowEmptyString()] [String]$message,
-        [Parameter (Mandatory = $false)] [Switch]$prependNewLine,
-        [Parameter (Mandatory = $false)] [Switch]$suppressOutputToFile,
-        [Parameter (Mandatory = $false)] [Switch]$suppressOutputToScreen,
-        [Parameter (Mandatory = $false)] [ValidateSet("INFO", "ERROR", "WARNING", "EXCEPTION","ADVISORY","DEBUG")] [String]$type = "INFO"
+        [Parameter(Mandatory = $false)] [Switch]$appendNewLine,
+        [Parameter(Mandatory = $true)] [AllowEmptyString()] [String]$message,
+        [Parameter(Mandatory = $false)] [Switch]$prependNewLine,
+        [Parameter(Mandatory = $false)] [Switch]$suppressOutputToFile,
+        [Parameter(Mandatory = $false)] [Switch]$suppressOutputToScreen,
+        [Parameter(Mandatory = $false)] [ValidateSet("INFO", "ERROR", "WARNING", "EXCEPTION","ADVISORY","DEBUG")] [String]$type = "INFO"
     )
 
     # Define color mapping for different message types
@@ -515,10 +513,10 @@ Function Invoke-CheckUrl {
     #>
 
     Param (
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [PSCredential]$credential,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$message,
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$url,
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$urlType
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [PSCredential]$credential,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$message,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$url,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$urlType
     )
 
     if ($message) {
@@ -568,8 +566,8 @@ Function New-ChoiceMenu {
     #>
 
     Param (
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$defaultAnswer,
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$question
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$defaultAnswer,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$question
     )
 
     $title = ""  # Empty title for cleaner prompt display
@@ -603,7 +601,7 @@ Function Test-VcenterReachability {
     #>
 
     Param (
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
     )
 
     $webRequestTimeOut = Show-PowerCliWebOperationTimeOut
@@ -669,7 +667,7 @@ Function Test-EndPointConnections {
     If ($sddcConnection -and $sddcConnection.IsConnected) {
 
         # menu-driven workflow
-        if ($Headless -eq "disabled") {
+        if ($Script:Headless -eq "disabled") {
             if ($sddcConnection.IsConnected -and (-not (($vcenterConnections | Where-Object IsConnected).Name))) {
                 Write-LogMessage -Type INFO -AppendNewLine -Message "Attempting to reconnecting to vCenter(s)..."
                 Connect-VcfVcenters
@@ -687,30 +685,32 @@ Function Test-EndPointConnections {
         }
     }
     # Non-SDDC Managed controlled environments
-    $viServers = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
-    if (-not $viServers -or -not (($viServers | Where-Object IsConnected).Name)) {
-        if ($Headless -eq "disabled") {
-            Select-EndpointType
-            return
-        }
-        Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message "Not connected to vCenter(s) and/or SDDC Manager, please reconnect"
-    }
-
-    # Look for duplicate VI Server connections under different usernames and exit if found.
-    if ($viServers) {
-        $vcenterServerNames = @($viServers.Name)
-        $vcenterServerConnections = $vcenterServerNames.Count
-        $vcenterServerUniqueFqdns = @($vcenterServerNames | Select-Object -Unique).Count
-
-        if ([int]$vcenterServerConnections -ne [int]$vcenterServerUniqueFqdns) {
-        Write-Output ""
-        Write-LogMessage -Type ERROR -AppendNewLine -Message "Error: Script execution system is connected to at least one vCenter using multiple users.  Only one connection per vCenter is supported."
-            $vcenterWithMultiConnections = $($viServers | Group-Object -Property Name | Where-Object Count -gt 1).Name
-            foreach ($vcenterWithMultiConnection in $vcenterWithMultiConnections) {
-                $connectedUsers = ($viServers | Where-Object { $_.Name -eq $vcenterWithMultiConnection }).User
-                Write-LogMessage -Type ERROR -AppendNewLine -Message "Connected to vCenter `"$vcenterWithMultiConnection`" with the following accounts: $connectedUsers"
+    if (-not $Script:SkipVcenter) {
+        $viServers = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
+        if (-not $viServers -or -not (($viServers | Where-Object IsConnected).Name)) {
+            if ($Script:Headless -eq "disabled") {
+                Select-EndpointType
+                return
             }
-            Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message "Script execution system is connected to at least one vCenter using multiple users"
+            Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message "Not connected to vCenter(s) and/or SDDC Manager, please reconnect"
+        }
+
+        # Look for duplicate VI Server connections under different usernames and exit if found.
+        if ($viServers) {
+            $vcenterServerNames = @($viServers.Name)
+            $vcenterServerConnections = $vcenterServerNames.Count
+            $vcenterServerUniqueFqdns = @($vcenterServerNames | Select-Object -Unique).Count
+
+            if ([int]$vcenterServerConnections -ne [int]$vcenterServerUniqueFqdns) {
+            Write-Output ""
+            Write-LogMessage -Type ERROR -AppendNewLine -Message "Error: Script execution system is connected to at least one vCenter using multiple users.  Only one connection per vCenter is supported."
+                $vcenterWithMultiConnections = $($viServers | Group-Object -Property Name | Where-Object Count -gt 1).Name
+                foreach ($vcenterWithMultiConnection in $vcenterWithMultiConnections) {
+                    $connectedUsers = ($viServers | Where-Object { $_.Name -eq $vcenterWithMultiConnection }).User
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Connected to vCenter `"$vcenterWithMultiConnection`" with the following accounts: $connectedUsers"
+                }
+                Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message "Script execution system is connected to at least one vCenter using multiple users"
+            }
         }
     }
 }
@@ -882,7 +882,6 @@ Function Exit-WithCode {
     # Exit with the specified code
     exit $exitCode
 }
-
 Function Get-CredentialFromJsonOrPrompt {
     <#
         .SYNOPSIS
@@ -973,7 +972,7 @@ Function Invoke-ConnectionWithRetry {
     )
 
     if (-not $connectionSuccessful) {
-        if ($Headless -eq "disabled" -and -not $isJsonMode) {
+        if ($Script:Headless -eq "disabled" -and -not $isJsonMode) {
             $decision = New-ChoiceMenu -Question $retryPromptMessage -DefaultAnswer yes
 
             if ($decision -eq 0) {
@@ -1254,14 +1253,14 @@ Function Invoke-SddcManagerServiceCheck {
     #>
 
 	Param (
-        [Parameter (Mandatory = $true)] [SecureString]$guestPassword,
-        [Parameter (Mandatory = $true)] [String]$guestUser,
-        [Parameter (Mandatory = $true)] [String]$guestVm,
-        [Parameter (Mandatory = $true)] [String]$service
+        [Parameter(Mandatory = $true)] [SecureString]$guestPassword,
+        [Parameter(Mandatory = $true)] [String]$guestUser,
+        [Parameter(Mandatory = $true)] [String]$guestVm,
+        [Parameter(Mandatory = $true)] [String]$service
 	)
 
     # Verify we're connected to the appropriate endpoints before continuing.
-    if (-not $DryRun) {
+    if (-not $dryRun) {
         # Verify we're connected to the appropriate endpoints before continuing.
         Test-EndPointConnections
     }
@@ -1342,15 +1341,15 @@ Function Invoke-SddcManagerPropertyFilesConfig {
     #>
 
     Param (
-        [Parameter (Mandatory = $true)] [ValidateSet("Check","Update")] [String]$action,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$downloadToken,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotFqdn,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotPath,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newLcmManifestDirValue,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newProductCatalogValue,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newProxyHttpStatuses,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newRepoDirValue,
-        [Parameter (Mandatory = $false)] [ValidateRange(1, 300)] [Int]$serviceRestartWaitSeconds = 30
+        [Parameter(Mandatory = $true)] [ValidateSet("Check","Update")] [String]$action,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$downloadToken,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotFqdn,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotPath,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newLcmManifestDirValue,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newProductCatalogValue,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newProxyHttpStatuses,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newRepoDirValue,
+        [Parameter(Mandatory = $false)] [ValidateRange(1, 300)] [Int]$serviceRestartWaitSeconds = 30
     )
 
     # Verify we're connected to the appropriate endpoints before continuing.
@@ -1809,11 +1808,11 @@ Function Invoke-VcenterApplianceDepotConfig {
     #>
 
     Param (
-        [Parameter (Mandatory = $true)] [ValidateSet("Check","Update")] [String]$action,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotPrefix,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotSuffix,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Array]$totVcenterVersions,
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
+        [Parameter(Mandatory = $true)] [ValidateSet("Check","Update")] [String]$action,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotPrefix,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$newDepotSuffix,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Array]$totVcenterVersions,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
     )
 
     # Verify token on connected endpoints before continuing.
@@ -1962,7 +1961,7 @@ Function Update-DefaultVcenterSystemDepots {
     #>
 
     Param (
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
     )
 
     # Verify we're connected to the appropriate endpoints before continuing.
@@ -2047,11 +2046,11 @@ Function Invoke-VcenterHostDepotConfig {
     #>
 
     Param (
-        [Parameter (Mandatory = $true)] [ValidateSet("Check","Update")] [String]$action,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$downloadToken,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Array]$lcmDomains,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Array]$newDepots,
-        [Parameter (Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
+        [Parameter(Mandatory = $true)] [ValidateSet("Check","Update")] [String]$action,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$downloadToken,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Array]$lcmDomains,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Array]$newDepots,
+        [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$vcenter
     )
 
     # Verify we're connected to the appropriate endpoints before continuing.
@@ -2193,7 +2192,7 @@ Function Select-DownloadToken {
         Select-DownloadToken
     #>
 
-    if ($Headless -eq "disabled") {
+    if ($Script:Headless -eq "disabled") {
         Do {
             Test-EndPointConnections
             $Script:DownloadTokenMenuInterface = Read-Host "Enter your Broadcom download token or press 'c' to cancel"
@@ -2230,9 +2229,9 @@ Function Set-DepotConfiguration {
     #>
 
     Param (
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$downloadToken,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$dryRun,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$skipSddcManagerTaskCheck
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$downloadToken,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$dryRun,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$skipSddcManagerTaskCheck
     )
 
     Write-LogMessage -Type DEBUG -Message "Entered Set-DepotConfiguration"
@@ -2304,32 +2303,40 @@ Function Set-DepotConfiguration {
         Invoke-CheckUrl -UrlType "SDDC Manager Depot" -Url "https://$($depotConfig.DepotFqdn)$($depotConfig.SddcManagerBasePath)$($depotConfig.SddcManagerRepoDir)/index.v3" -Credential $sddcManagerMockCredential
     }
 
-    foreach ($depot in $hostDepotArray) {
-        Invoke-CheckUrl -UrlType "ESX Host Depot" -Url $($depot.Url) -Message $($depot.Description)
-    }
+    if (-not $Script:SkipVcenter) {
+        foreach ($depot in $hostDepotArray) {
+            Invoke-CheckUrl -UrlType "ESX Host Depot" -Url $($depot.Url) -Message $($depot.Description)
+        }
 
-    Invoke-CheckUrl -UrlType "vCenter Appliance Depot" -Url "$newVcenterApplianceDepotPrefix/$($($depotConfig.TotVcenterVersions[1]))/manifest/manifest-latest.xml"
+        Invoke-CheckUrl -UrlType "vCenter Appliance Depot" -Url "$newVcenterApplianceDepotPrefix/$($($depotConfig.TotVcenterVersions[1]))/manifest/manifest-latest.xml"
+    } else {
+        Write-LogMessage -Type INFO -AppendNewLine -Message "Skipping vCenter-based dry-run checks..."
+    }
 
     # This completes the non-mutating portion of the function call.
     if ($dryRun) {
         return
     }
 
-    Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning depot update operations..."
+    if (-not $Script:SkipVcenter) {
+        Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning depot update operations..."
 
-    $vcenterConnections = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
-    if ($vcenterConnections) {
-        foreach ($vcenter in ($vcenterConnections | Where-Object IsConnected)) {
-            Invoke-VcenterApplianceDepotConfig -Vcenter $vcenter -Action Update -NewDepotPrefix $newVcenterApplianceDepotPrefix -TotVcenterVersions $($depotConfig.TotVcenterVersions)
-            if ($Script:LogOnly -eq "disabled") {
-            Write-Output "==========`n"
-        }
+        $vcenterConnections = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
+        if ($vcenterConnections) {
+            foreach ($vcenter in ($vcenterConnections | Where-Object IsConnected)) {
+                Invoke-VcenterApplianceDepotConfig -Vcenter $vcenter -Action Update -NewDepotPrefix $newVcenterApplianceDepotPrefix -TotVcenterVersions $($depotConfig.TotVcenterVersions)
+                if ($Script:LogOnly -eq "disabled") {
+                Write-Output "==========`n"
+            }
 
-            Invoke-VcenterHostDepotConfig -Vcenter $vcenter -Action Update -NewDepots $hostDepotArray -LcmDomains $($depotConfig.LcmDomains) -DownloadToken $downloadToken
-            if ($Script:LogOnly -eq "disabled") {
-            Write-Output "==========`n"
+                Invoke-VcenterHostDepotConfig -Vcenter $vcenter -Action Update -NewDepots $hostDepotArray -LcmDomains $($depotConfig.LcmDomains) -DownloadToken $downloadToken
+                if ($Script:LogOnly -eq "disabled") {
+                Write-Output "==========`n"
+                }
             }
         }
+    } else {
+        Write-LogMessage -Type INFO -AppendNewLine -Message "Skipping vCenter depot updates."
     }
 
     # Only Update SDDC Manager if connected to SDDC Manager
@@ -2649,7 +2656,7 @@ Function Connect-VcfVcenters {
             Write-LogMessage -Type ERROR -AppendNewLine -Message "Cannot retrieve vCenter credentials from SDDC Manager `"$sddcName`"."
         }
         Show-AnyKey
-        if ($Headless -eq "disabled") {
+        if ($Script:Headless -eq "disabled") {
             Show-MainMenu
         } else {
             Exit-WithCode -exitCode $Script:ExitCodes.AUTHENTICATION_ERROR -message "Insufficient permissions to retrieve vCenter credentials"
@@ -2737,7 +2744,7 @@ Function Show-Version {
     #>
 
     Param (
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence
     )
 
     if (-not $silence) {
@@ -2846,9 +2853,9 @@ Function Disconnect-SddcManager {
     #>
 
     Param (
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$noPrompt,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$overrideQuestion,
-        [Parameter (Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$noPrompt,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [String]$overrideQuestion,
+        [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$silence
     )
 
     # Get SDDC connection for strict mode compliance
@@ -2921,6 +2928,7 @@ Function Show-Help {
     Write-Output "   -Silence                           #   * Optional parameter: Silence.`n"
     Write-Output "-DryRun                               # Validate that the new URLs with your download token are reachable from your system."
     Write-Output "   -Silence                           #   * Optional parameter: Silence.`n"
+    Write-Output "-SkipVcenter <Enable|Disable>         # (VCF Only) (Optional) Skip vCenter Depot Updates.`n"
     Write-Output "-Update                               # Update Depots."
     Write-Output "    -DownloadToken                    #   * Required parameter: DownloadToken."
     Write-Output "    -Silence                          #   * Optional parameter: Silence.`n"
@@ -3020,9 +3028,10 @@ Function Show-MainMenu {
         Write-Host -Object " 5. (Optional) Dry run (validate token)" -ForegroundColor $foregroundColor
         Write-Host -Object " 6. (Optional) Disconnect from endpoints." -ForegroundColor $foregroundColor
         Write-Host -Object " 7. (Optional) Show Version." -ForegroundColor $foregroundColor
+        Write-Host -Object " 8. (Optional) (Advanced) Toggle SkipVcenter Updates Flag for VCF Environments." -ForegroundColor $foregroundColor
         Write-Host -Object " Q. Press Q to Quit" -ForegroundColor Cyan;
         Write-Host -Object $errout
-        $menuInput = Read-Host -Prompt '(1-7 or Q)'
+        $menuInput = Read-Host -Prompt '(1-8 or Q)'
         $menuInput = $menuInput -replace "`t|`n|`r",""
         Switch ($menuInput)
         {
@@ -3087,6 +3096,19 @@ Function Show-MainMenu {
                 Show-AnyKey
                 Show-MainMenu
             }
+            8
+            {
+                if ($Script:SkipVcenter) {
+                    Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
+                    Write-LogMessage -Type INFO -Message "Disabling SkipVcenter mode."
+                } else {
+                    $Script:SkipVcenter=$true
+                    Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
+                }
+                Show-AnyKey
+                Show-MainMenu
+
+            }
             Q
             {
                 $sddcConnection = Get-Variable -Name DefaultSddcManagerConnections -ValueOnly -ErrorAction SilentlyContinue -Scope Global
@@ -3095,7 +3117,8 @@ Function Show-MainMenu {
                     Remove-Variable -ErrorAction SilentlyContinue -Name SddcManagerRootPassword -Scope Global
                 }
                 Disconnect-Vcenter -AllServers -Silence
-                Remove-Variable -ErrorAction SilentlyContinue -Name DownloadTokenMenuInterface -Scope Global
+                Remove-Variable -ErrorAction SilentlyContinue -Name DownloadTokenMenuInterface -Scope Script
+                Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
                 Exit
             }
             Default
@@ -3110,7 +3133,7 @@ Function Show-MainMenu {
 # Variables and Constants
 $ConfirmPreference = "None"
 $Global:ProgressPreference = 'SilentlyContinue'  # Must be Global for PowerShell to respect it
-$scriptVersion = '1.1.0.0.51'
+$scriptVersion = '1.0.0.0.54'
 $psVersionMinVersion = '7.2'
 $downloadTokenLength = '32'
 $minimumVcenterRelease = '7.0'
@@ -3130,7 +3153,7 @@ if ($Help) {
     Exit-WithCode -exitCode $Script:ExitCodes.SUCCESS -message "Help displayed"
 }
 
-# assume headless mode until all conditions have been checked
+# assume headless mode until all conditions have been checked.
 $Script:Headless = 'enabled'
 
 if ($Silence) {
@@ -3221,6 +3244,19 @@ switch ($true) {
             Set-DepotConfiguration -DownloadToken $downloadToken -DryRun
         }
     }
+    $skipVcenter {
+        if ($skipVcenter -eq "Enable") {
+            Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
+            $Script:SkipVcenter=$True
+        } elseif ($skipVcenter -eq "Disable") {
+            Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
+            Write-LogMessage -Type INFO -Message "Disabling SkipVcenter mode."
+
+        } else {
+            Write-LogMessage -Type ERROR -AppendNewLine -Message "SkipVcenter parameter must be Enable or Disable."
+            Exit-WithCode -exitCode $Script:ExitCodes.PARAMETER_ERROR -message "SkipVcenter parameter must be Enable or Disable"
+        }
+    }
     $update {
         if (-not $downloadToken) {
             Exit-WithCode -exitCode $Script:ExitCodes.PARAMETER_ERROR -message "Required parameter -DownloadToken not found"
@@ -3234,8 +3270,6 @@ switch ($true) {
     Show-Version
     }
     Default {
-    # Clear DownloadTokenMenuInterface before continuing, in case a user didn't quit using "q" from the main menu.
-    Remove-Variable -ErrorAction SilentlyContinue -Name DownloadTokenMenuInterface -Scope Global
     $Script:Headless = 'disabled'
     Show-MainMenu
     }
