@@ -2,10 +2,5 @@
 
   **Markdown**
   ```markdown
-[![GitHub Clones](https://img.shields.io/badge/dynamic/json?color=success&label=Clone&query=count&url=https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json&logo=github)](https://github.com/MShawon/github-clone-count-badge)
-
+[![GitHub Clones](https://img.shields.io/badge/dynamic/json?color=success&label=Clone&query=count&url=https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json&logo=github)](https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json)
   ```
-  **HTML**
-  ```html
-<a href='https://github.com/MShawon/github-clone-count-badge'><img alt='GitHub Clones' src='https://img.shields.io/badge/dynamic/json?color=success&label=Clone&query=count&url=https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json&logo=github'></a>
-```

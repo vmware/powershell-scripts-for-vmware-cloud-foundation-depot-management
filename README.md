@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Broadcom-green.svg)](LICENSE.md)
 [![PowerShell](https://img.shields.io/badge/PowerShell-7.2%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
+[![GitHub Clones](https://img.shields.io/badge/dynamic/json?color=success&label=Clone&query=count&url=https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json&logo=github)](https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json)
 
 A collection of PowerShell scripts to help manage and configure VMware depot repositories for VMware Cloud Foundation (VCF) and vCenter Server environments.
 
