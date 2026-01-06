@@ -3,6 +3,7 @@
 [![License](https://img.shields.io/badge/License-Broadcom-green.svg)](LICENSE.md)
 [![PowerShell](https://img.shields.io/badge/PowerShell-7.2%2B-blue.svg)](https://github.com/PowerShell/PowerShell)
 [![GitHub Clones](https://img.shields.io/badge/dynamic/json?color=success&label=Clone&query=count&url=https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json&logo=github)](https://gist.githubusercontent.com/nathanthaler/996e1bc9a72a1c597cfd79e3488b8498/raw/clone.json)
+[![Changelog](https://img.shields.io/badge/Changelog-Read-blue)](CHANGELOG.md)
 
 A collection of PowerShell scripts to help manage and configure VMware depot repositories for VMware Cloud Foundation (VCF) and vCenter Server environments.
 
@@ -38,8 +39,9 @@ cd VMwareDepotChange
 
 ## 📚 Prerequisites
 
-- PowerShell 7.x or later
-- VCF.PowerCLI module
+- [VCF.PowerCLI 9.0+](https://developer.broadcom.com/powercli)
+- [PowerShell 7.2+](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell)
+- Compatible OS: MacOS / Linux / Windows
 - Administrative credentials for vCenter or SDDC Manager
 - Broadcom download token (for depot updates)
 
@@ -49,6 +51,11 @@ cd VMwareDepotChange
 - [PowerCLI Installation Guide](https://developer.broadcom.com/powercli/installation-guide)
 - [VMware by Broadcom Support Portal](https://support.broadcom.com/)
 - [Knowledge Base Article 389276](https://knowledge.broadcom.com/external/article/389276)
+
+## Support
+
+- For product issues, please open a standard Broadcom support case.
+- For bugs or enhancement requests with this script, please open a [github issue](powershell-scripts-for-vmware-cloud-foundation-depot-management/issues).
 
 ## 📄 License
 
