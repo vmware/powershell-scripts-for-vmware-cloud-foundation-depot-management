@@ -33,8 +33,7 @@
 #
 # This script is intended to help users transition to the new VMware by Broadcom depot structures.
 #
-# Last modified: 2025-11-24
-#
+# Last modified: 2026-04-24
 # KB: https://knowledge.broadcom.com/external/article/389276
 #
 Param (
@@ -112,7 +111,7 @@ Function Show-PowerCliWebOperationTimeOut {
         This is useful for informing users how long to wait for operations.
     #>
 
-    $webRequestTimeOut = (Get-PowerCLIConfiguration).WebOperationTimeoutSeconds | Sort-Object Desc | Select-Object -First 1
+    $webRequestTimeOut = (Get-PowerCLIConfiguration).WebOperationTimeoutSeconds | Sort-Object -Descending | Select-Object -First 1
     return $webRequestTimeOut
 
 }
@@ -215,8 +214,8 @@ Function Show-AnyKey {
     [CmdletBinding()]
     Param()
 
-    # function Show-AnyKey is not required in headless mode
-    if ($Script:Headless -eq "disabled") {
+    # Show-AnyKey is not required in headless mode.
+    if (-not $Script:Headless) {
         Write-Host "`nPress any key to continue...`n" -ForegroundColor Yellow;
         $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') | Out-Null
     }
@@ -323,16 +322,16 @@ Function Write-LogMessage {
         Default value is "INFO".
 
         .EXAMPLE
-        Write-LogMessage -type INFO -message "Process started successfully"
+        Write-LogMessage -Type INFO -Message "Process started successfully"
 
         .EXAMPLE
-        Write-LogMessage -type ERROR -message "Failed to connect" -prependNewLine
+        Write-LogMessage -Type ERROR -Message "Failed to connect" -prependNewLine
 
         .EXAMPLE
-        Write-LogMessage -type DEBUG -message "Variable value: $myVar"
+        Write-LogMessage -Type DEBUG -Message "Variable value: $myVar"
 
         .EXAMPLE
-        Write-LogMessage -type WARNING -message "Configuration not found" -suppressOutputToScreen
+        Write-LogMessage -Type WARNING -Message "Configuration not found" -suppressOutputToScreen
     #>
 
     Param (
@@ -364,17 +363,17 @@ Function Write-LogMessage {
     $shouldDisplay = Test-LogLevel -messageType $type -configuredLevel $Script:configuredLogLevel
 
     # Add blank line before message if requested and not in log-only mode and meets log level threshold
-    if ($prependNewLine -and (-not ($Script:LogOnly -eq "enabled")) -and $shouldDisplay) {
+    if ($prependNewLine -and (-not $Script:LogOnly) -and $shouldDisplay) {
         Write-Output ""
     }
 
     # Display message to console with color coding (unless suppressed, in log-only mode, or below log level threshold)
-    if (-not $suppressOutputToScreen -and $Script:LogOnly -ne "enabled" -and $shouldDisplay) {
+    if (-not $suppressOutputToScreen -and -not $Script:LogOnly -and $shouldDisplay) {
         Write-Host -ForegroundColor $messageColor "[$type] $message"
     }
 
     # Add blank line after message if requested and not in log-only mode and meets log level threshold
-    if ($appendNewLine -and (-not ($Script:LogOnly -eq "enabled")) -and $shouldDisplay) {
+    if ($appendNewLine -and (-not $Script:LogOnly) -and $shouldDisplay) {
         Write-Output ""
     }
 
@@ -414,8 +413,9 @@ Function New-LogFile {
 
     if (-not $logFolderExists) {
         Write-Host "LogFolder not found, creating $logFolder" -ForegroundColor Yellow;
-        New-Item -ItemType Directory -Path $logFolder | Out-Null
-        if (-not $?) {
+        try {
+            New-Item -ItemType Directory -Path $logFolder -ErrorAction Stop | Out-Null
+        } catch {
             Write-LogMessage -Type ERROR -Message "Failed to create log directory. Exiting."
             Exit-WithCode -exitCode $Script:ExitCodes.GENERAL_ERROR -message "Failed to create log directory"
         }
@@ -442,19 +442,21 @@ Function Get-EnvironmentSetup {
 
     $powerShellRelease = $($PSVersionTable.PSVersion).ToString()
 
-    $vcfPowerCliModule = Get-Module -ListAvailable -Name VCF.PowerCLI -ErrorAction SilentlyContinue | Sort-Object Revision | Select-Object -First 1
+    $vcfPowerCliModule = Get-Module -ListAvailable -Name VCF.PowerCLI -ErrorAction SilentlyContinue | Sort-Object Revision -Descending | Select-Object -First 1
     $vcfPowerCliRelease = if ($vcfPowerCliModule) { $vcfPowerCliModule.Version } else { $null }
 
-    $vmwarePowerCliModule = Get-Module -ListAvailable -Name VMware.PowerCLI -ErrorAction SilentlyContinue | Sort-Object Revision | Select-Object -First 1
+    $vmwarePowerCliModule = Get-Module -ListAvailable -Name VMware.PowerCLI -ErrorAction SilentlyContinue | Sort-Object Revision -Descending | Select-Object -First 1
     $vmwarePowerCliRelease = if ($vmwarePowerCliModule) { $vmwarePowerCliModule.Version } else { $null }
 
     $operatingSystem = $($PSVersionTable.OS)
 
     # Work-around for MacOS which displays Darwin kernel release when from $($PSVersionTable.OS).  However, if this call fails, revert to what we know.
+    $macOsVersion = $null
     if ($IsMacOS) {
         try {
             $macOsVersion = (system_profiler SPSoftwareDataType -json | ConvertFrom-Json | ForEach-Object spsoftwaredatatype | Where-Object _name -eq os_overview).os_version
         } catch [Exception] {
+            Write-LogMessage -Type DEBUG -Message "Could not retrieve macOS version from system_profiler: $($_.Exception.Message)"
         }
     }
     if ($macOsVersion) {
@@ -524,21 +526,24 @@ Function Invoke-CheckUrl {
     } else {
         Write-LogMessage -Type INFO -Message "Checking new `"$urlType`" URL ..."
     }
+    $statusCode = $null
     try {
         if ($credential) {
-            $statusCode=(Invoke-WebRequest $url -Credential $credential -Timeout 10 -UserAgent "VMwareDepotChange-PowershellScript").StatusCode
+            $statusCode=(Invoke-WebRequest $url -UseBasicParsing -Credential $credential -Timeout 10 -UserAgent "VMwareDepotChange-PowershellScript").StatusCode
         } else {
-            $statusCode=(Invoke-WebRequest $url -Timeout 10 -UserAgent "VMwareDepotChange-PowershellScript").StatusCode
+            $statusCode=(Invoke-WebRequest $url -UseBasicParsing -Timeout 10 -UserAgent "VMwareDepotChange-PowershellScript").StatusCode
         }
     }
     catch [Exception] {
-        if ($($Error[0]) -match "invalid|expired|Object Not Found") {
-            $errorMessage = $($Error[0])
+        # Prefer ErrorDetails.Message (HTTP response body) over Exception.Message (HTTP status line).
+        $fullErrorText = if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+        if ($fullErrorText -match "invalid|expired|Object Not Found") {
+            $errorMessage = $fullErrorText.Trim()
         } else {
             $errorMessage = "Unknown"
         }
         Write-LogMessage -Type WARNING -AppendNewLine -Message "Received `"$errorMessage`" error accessing `"$url`"."
-        Write-LogMessage -Type WARNING -SuppressOutputToScreen -Message "Full error message for URL `"$url`" is $($Error[0])"
+        Write-LogMessage -Type WARNING -SuppressOutputToScreen -Message "Full error message for URL `"$url`" is $fullErrorText"
     }
     if ($statusCode) {
         Write-LogMessage -Type INFO -AppendNewLine -Message "Successfully accessed `"$url`" (it received a HTTP/$statusCode message)."
@@ -570,7 +575,7 @@ Function New-ChoiceMenu {
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$question
     )
 
-    $title = ""  # Empty title for cleaner prompt display
+    $title = ""  # Empty title for cleaner prompt display.
     $choices = New-Object Collections.ObjectModel.Collection[Management.Automation.Host.ChoiceDescription]
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList '&Yes'))
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList '&No'))
@@ -608,17 +613,17 @@ Function Test-VcenterReachability {
     Write-LogMessage -Type DEBUG -Message "Testing vCenter `"$vcenter`" reachability from script execution system (PowerCLI timeout is configured as $webRequestTimeOut seconds)..."
 
     try {
-        # Attempt a privileged, non-mutating operation to validate admin permissions and reachability
+        # Attempt a privileged, non-mutating operation to validate admin permissions and reachability.
         $Response = Get-VIEvent -MaxSamples 1 -Server $vcenter -ErrorAction SilentlyContinue
     }
     catch [Exception] {
-        $errorMessage = $Error[0].Exception.message
+        $errorMessage = $_.Exception.Message
         switch -Regex ($errorMessage) {
             "timed out" {
                 Write-LogMessage -Type WARNING -AppendNewLine -Message "vCenter `"$vcenter`" is unreachable from this connected to this script execution system."
             }
             "Could not find any of the servers" {
-            # This likely occurred because we already disconnected the server.
+                    # This likely occurred because we already disconnected the server.
                 Write-LogMessage -Type WARNING -SuppressOutputToScreen -Message "vCenter `"$vcenter`" is not connected to this script execution system.  This is likely ignorable."
             }
             Default {
@@ -631,6 +636,7 @@ Function Test-VcenterReachability {
         try {
             Disconnect-VIServer -Server $vcenter -Confirm:$false -Force -ErrorAction SilentlyContinue
         } catch [Exception] {
+            Write-LogMessage -Type DEBUG -Message "Exception during forced disconnect of unavailable vCenter `"$vcenter`": $($_.Exception.Message)"
         }
 
         $vcenterConnections = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
@@ -666,8 +672,8 @@ Function Test-EndPointConnections {
 
     If ($sddcConnection -and $sddcConnection.IsConnected) {
 
-        # menu-driven workflow
-        if ($Script:Headless -eq "disabled") {
+        # Menu-driven workflow.
+        if (-not $Script:Headless) {
             if ($sddcConnection.IsConnected -and (-not (($vcenterConnections | Where-Object IsConnected).Name))) {
                 Write-LogMessage -Type INFO -AppendNewLine -Message "Attempting to reconnecting to vCenter(s)..."
                 Connect-VcfVcenters
@@ -684,11 +690,11 @@ Function Test-EndPointConnections {
             }
         }
     }
-    # Non-SDDC Managed controlled environments
+    # Non-SDDC Managed controlled environments.
     if (-not $Script:SkipVcenter) {
         $viServers = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
         if (-not $viServers -or -not (($viServers | Where-Object IsConnected).Name)) {
-            if ($Script:Headless -eq "disabled") {
+            if (-not $Script:Headless) {
                 Select-EndpointType
                 return
             }
@@ -743,20 +749,20 @@ Function ConvertFrom-JsonSafely {
         [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$jsonFilePath
     )
 
-    Write-LogMessage -type DEBUG -message "Loading JSON file: $jsonFilePath"
+    Write-LogMessage -Type DEBUG -Message "Loading JSON file: $jsonFilePath"
 
-    if ($Script:LogOnly -eq "disabled") {
+    if (-not $Script:LogOnly) {
         Write-Host ""
     }
 
     try {
-        # Read file content as a single string (Raw parameter) to ensure proper JSON parsing
-        Write-LogMessage -type DEBUG -message "Reading file with -Raw parameter to preserve JSON structure"
+        # Read file content as a single string (Raw parameter) to ensure proper JSON parsing.
+        Write-LogMessage -Type DEBUG -Message "Reading file with -Raw parameter to preserve JSON structure"
         $fileContent = Get-Content -Path $jsonFilePath -Raw
-        Write-LogMessage -type DEBUG -message "File content length: $($fileContent.Length) characters"
+        Write-LogMessage -Type DEBUG -Message "File content length: $($fileContent.Length) characters"
         $credentials = $fileContent | ConvertFrom-Json
-        Write-LogMessage -type DEBUG -message "JSON successfully parsed into $($credentials.GetType().FullName)"
-        Write-LogMessage -type DEBUG -message "Credentials is Array: $($credentials -is [Array]), Count: $(if ($credentials -is [Array]) { $credentials.Count } else { 'N/A' })"
+        Write-LogMessage -Type DEBUG -Message "JSON successfully parsed into $($credentials.GetType().FullName)"
+        Write-LogMessage -Type DEBUG -Message "Credentials is Array: $($credentials -is [Array]), Count: $(if ($credentials -is [Array]) { $credentials.Count } else { 'N/A' })"
 
         # Use comma operator to prevent array unrolling on return
         return ,$credentials
@@ -765,7 +771,7 @@ Function ConvertFrom-JsonSafely {
         # Handle JSON parsing errors with detailed, user-friendly logging
         $errorMessage = $_.Exception.Message
 
-        Write-LogMessage -type ERROR -message "JSON validation failed for file: $jsonFilePath"
+        Write-LogMessage -Type ERROR -Message "JSON validation failed for file: $jsonFilePath"
         Write-Host ""
 
         # Extract the specific JSON error and location
@@ -775,15 +781,15 @@ Function ConvertFrom-JsonSafely {
             $lineNum = $matches[3]
             $position = $matches[4]
 
-            Write-LogMessage -type ERROR -message "Invalid escape sequence: '\$badChar' in JSON property '$jsonPath'"
-            Write-LogMessage -type ERROR -message "Location: Line $lineNum, Position $position"
+            Write-LogMessage -Type ERROR -Message "Invalid escape sequence: '\$badChar' in JSON property '$jsonPath'"
+            Write-LogMessage -Type ERROR -Message "Location: Line $lineNum, Position $position"
             Write-Host ""
-            Write-LogMessage -type ERROR -message "Common causes:"
-            Write-LogMessage -type ERROR -message "  1. Windows file paths must use forward slashes (/) or escaped backslashes (\\\\)"
-            Write-LogMessage -type ERROR -message "     Example: `"C:/Users/Admin/file.yml`" or `"C:\\\\Users\\\\Admin\\\\file.yml`""
-            Write-LogMessage -type ERROR -message "  2. Backslash (\) is a special character in JSON and must be escaped"
+            Write-LogMessage -Type ERROR -Message "Common causes:"
+            Write-LogMessage -Type ERROR -Message "  1. Windows file paths must use forward slashes (/) or escaped backslashes (\\\\)"
+            Write-LogMessage -Type ERROR -Message "     Example: `"C:/Users/Admin/file.yml`" or `"C:\\\\Users\\\\Admin\\\\file.yml`""
+            Write-LogMessage -Type ERROR -Message "  2. Backslash (\) is a special character in JSON and must be escaped"
             Write-Host ""
-            Write-LogMessage -type ERROR -message "Please correct the JSON syntax in '$jsonFilePath' at line $lineNum and try again."
+            Write-LogMessage -Type ERROR -Message "Please correct the JSON syntax in '$jsonFilePath' at line $lineNum and try again."
         }
         elseif ($errorMessage -match "Conversion from JSON failed with error: (.+?)\. Path '([^']+)'.*line (\d+).*position (\d+)") {
             $jsonError = $matches[1]
@@ -791,20 +797,20 @@ Function ConvertFrom-JsonSafely {
             $lineNum = $matches[3]
             $position = $matches[4]
 
-            Write-LogMessage -type ERROR -message "JSON parsing error: $jsonError"
-            Write-LogMessage -type ERROR -message "Property: '$jsonPath'"
-            Write-LogMessage -type ERROR -message "Location: Line $lineNum, Position $position"
+            Write-LogMessage -Type ERROR -Message "JSON parsing error: $jsonError"
+            Write-LogMessage -Type ERROR -Message "Property: '$jsonPath'"
+            Write-LogMessage -Type ERROR -Message "Location: Line $lineNum, Position $position"
             Write-Host ""
-            Write-LogMessage -type ERROR -message "Please correct the JSON syntax in '$jsonFilePath' and try again."
+            Write-LogMessage -Type ERROR -Message "Please correct the JSON syntax in '$jsonFilePath' and try again."
         }
         elseif ($errorMessage -match "Conversion from JSON failed with error") {
-            Write-LogMessage -type ERROR -message "JSON parsing error: $errorMessage"
+            Write-LogMessage -Type ERROR -Message "JSON parsing error: $errorMessage"
             Write-Host ""
-            Write-LogMessage -type ERROR -message "Please check the JSON syntax in '$jsonFilePath' and try again."
+            Write-LogMessage -Type ERROR -Message "Please check the JSON syntax in '$jsonFilePath' and try again."
         }
         else {
             # Fallback for unexpected error formats
-            Write-LogMessage -type ERROR -message "JSON parsing error: $errorMessage"
+            Write-LogMessage -Type ERROR -Message "JSON parsing error: $errorMessage"
         }
 
         # Exit script execution to prevent continuing with invalid data
@@ -860,24 +866,24 @@ Function Exit-WithCode {
         [Parameter(Mandatory = $false)] [Switch]$noCleanup
     )
 
-    Write-LogMessage -type DEBUG -message "Entered Exit-WithCode function..."
+    Write-LogMessage -Type DEBUG -Message "Entered Exit-WithCode function..."
 
     # Log final message if provided
     if ($message) {
         if ($exitCode -eq 0) {
-            Write-LogMessage -type INFO -message $message
+            Write-LogMessage -Type INFO -Message $message
         } else {
-            Write-LogMessage -type ERROR -message $message
+            Write-LogMessage -Type ERROR -Message $message
         }
     }
 
     # Optional cleanup logic for error exits
     if (-not $noCleanup -and $exitCode -ne 0) {
-        Write-LogMessage -type DEBUG -message "Exit code $exitCode indicates failure."
+        Write-LogMessage -Type DEBUG -Message "Exit code $exitCode indicates failure."
     }
 
     # Log the exit code for debugging
-    Write-LogMessage -type DEBUG -message "Script exiting with code $exitCode"
+    Write-LogMessage -Type DEBUG -Message "Script exiting with code $exitCode"
 
     # Exit with the specified code
     exit $exitCode
@@ -972,7 +978,7 @@ Function Invoke-ConnectionWithRetry {
     )
 
     if (-not $connectionSuccessful) {
-        if ($Script:Headless -eq "disabled" -and -not $isJsonMode) {
+        if (-not $Script:Headless -and -not $isJsonMode) {
             $decision = New-ChoiceMenu -Question $retryPromptMessage -DefaultAnswer yes
 
             if ($decision -eq 0) {
@@ -1096,7 +1102,7 @@ Function Connect-SddcManager {
     }
 
     # If no JSON file was provided and we're in interactive mode, prompt for credentials
-    if (-not $jsonInputFile -and $Script:Headless -eq "disabled") {
+    if (-not $jsonInputFile -and -not $Script:Headless) {
             Write-Output ""
 
         # Prompt for SDDC Manager FQDN with validation loop
@@ -1287,13 +1293,13 @@ Function Invoke-SddcManagerServiceCheck {
         }
         While ($results.ScriptOutput.Contains("502"))
         Write-LogMessage -Type INFO -AppendNewLine -Message "The $Service service on SDDC Manager `"$sddcName`" has been restarted successfully."
-        return 0 | Out-Null
+        return 0
     }
     Catch {
         $sddcConnection = Get-Variable -Name DefaultSddcManagerConnections -ValueOnly -ErrorAction SilentlyContinue -Scope Global
         $sddcName = if ($sddcConnection) { $sddcConnection.Name } else { "Unknown" }
         Write-LogMessage -Type ERROR -AppendNewLine -Message "The $Service service on SDDC Manager `"$sddcName`" failed to restart in a timely manner.  Please contact support."
-        return 1 | Out-Null
+        return 1
     }
 }
 Function Invoke-SddcManagerPropertyFilesConfig {
@@ -1367,23 +1373,23 @@ Function Invoke-SddcManagerPropertyFilesConfig {
         $sddcManagerVmName = $sddcConnection.Name.split('.')[0]
     }
     catch [Exception] {
-        if ($($Error[0].Exception.Message) -match "You cannot call a method on a null-valued expression") {
+        if ($($_.Exception.Message) -match "You cannot call a method on a null-valued expression") {
             Write-LogMessage -Type ERROR -AppendNewLine -Message "Not currently connected to an SDDC Manager."
         } else {
-            Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message $($Error[0].Exception.Message)
+            Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message $($_.Exception.Message)
         }
     }
     try {
         $sddcManagerVcenter = ((Invoke-VcfGetDomains).elements | Where-Object Type -eq MANAGEMENT).Vcenters.Fqdn
     } catch [Exception] {
-         # We use this verb in user output
-         $Action = $Action.ToLower()
-        if ($($Error[0].Exception.Message) -match "The request was canceled due to the configured HttpClient.Timeout") {
+        # We use this verb in user output.
+        $Action = $Action.ToLower()
+        if ($($_.Exception.Message) -match "The request was canceled due to the configured HttpClient.Timeout") {
             Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" is not is not reachable from this script execution system. Skipping $Action action..."
-        } elseif ($Error[0] -match "TOKEN_NOT_FOUND") {
+        } elseif ($_ -match "TOKEN_NOT_FOUND") {
             Write-LogMessage -Type ADVISORY -AppendNewLine -Message "Your SDDC Manager token has expired, please re-connect."
         } else {
-            Write-LogMessage -Type ERROR -AppendNewLine -Message $($Error[0].Exception.Message)
+            Write-LogMessage -Type ERROR -AppendNewLine -Message $($_.Exception.Message)
         }
     }
     if (-not $sddcManagerVcenter) {
@@ -1442,7 +1448,7 @@ Function Invoke-SddcManagerPropertyFilesConfig {
     $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $lcmPropertiesBackupConfigCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
 
     if (-not $results) {
-        $errorMessage = $Error[0]
+        $errorMessage = $Error[0].Exception.Message
         switch -Regex ($errorMessage) {
             "Value cannot be found for the mandatory parameter VM" {
                 Write-LogMessage -Type ERROR -AppendNewLine -Message "No SDDC Manager VM named `"$sddcManagerVmName`" found in `"$sddcManagerVcenter`".  Please revert to the run book."
@@ -1457,14 +1463,14 @@ Function Invoke-SddcManagerPropertyFilesConfig {
                 Write-LogMessage -Type ERROR -AppendNewLine -Message "Your system does not trust SDDC Manager `"$sddcManagerVmName`"'s certificate.  If this is expected, please run: Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -confirm:`$false"
             }
             Default {
-            Write-LogMessage -Type Error -AppendNewLine -Message "Unexpected error backing up configuration on SDDC Manager: $($Error[0].Exception.Message)"
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "Unexpected error backing up configuration on SDDC Manager: $errorMessage"
             }
         }
         return
     }
 
     # Keep the check results clean of all progress output.
-    if ($Action -ne $Check) {
+    if ($Action -ne "Check") {
         Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning SDDC Manager `"$($sddcConnection.Name)`" depot configuration check..."
     }
 
@@ -1481,6 +1487,8 @@ Function Invoke-SddcManagerPropertyFilesConfig {
     $proxyConfigMatch0 = Select-String -Path $localSddcManagerOperationPropertiesFile -Pattern "^$proxyConfigValidationHttpCodeParameter"
     $proxyConfigMatch1 = Select-String -Path $localSddcManagerOperationPropertiesFile -Pattern "^$proxyConfigValidationTestUrlParameter"
 
+    $depotFqdn = $null
+    $depotPath = $null
     if ($defaultLcmConfigMatch0 -and $defaultLcmConfigMatch1) {
         $sddcManagerConfig="$defaultDepotFqdn$defaultDepotPath"
     } else {
@@ -1491,7 +1499,8 @@ Function Invoke-SddcManagerPropertyFilesConfig {
         $sddcManagerConfig = "$depotFqdn$depotPath"
     }
 
-    if ($Action -eq "Check") {
+    switch ($Action) {
+    "Check" {
         if ($defaultLcmConfigMatch0 -and $defaultLcmConfigMatch1 -and $defaultLcmConfigMatch2 -and $defaultLcmConfigMatch3) {
             Write-LogMessage -Type INFO -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has the default depot configuration."
         } else {
@@ -1504,8 +1513,8 @@ Function Invoke-SddcManagerPropertyFilesConfig {
                 Write-LogMessage -Type INFO -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has the default operations manager configuration (does not support optional proxy configurations)."
             }
         }
-
-    } elseif ($Action -eq "Update")  {
+    }
+    "Update" {
         # Initialize flags
         $runningTasks = $null
         $skipLcmUpdate = $false
@@ -1537,10 +1546,10 @@ Function Invoke-SddcManagerPropertyFilesConfig {
                 }
             }
         } catch [Exception] {
-            if ($($Error[0].Exception.Message) -match "not currently connected to any servers" ) {
+            if ($($_.Exception.Message) -match "not currently connected to any servers" ) {
                 Write-LogMessage -Type ERROR -AppendNewLine -Message "Not connected to SDDC Manager, please reconnect."
             } else {
-                Write-LogMessage -Type ERROR -AppendNewLine -Message "Unexpected error retrieving VCF Tasks: $($Error[0].Exception.Message)"
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "Unexpected error retrieving VCF Tasks: $($_.Exception.Message)"
             }
         }
 
@@ -1549,7 +1558,7 @@ Function Invoke-SddcManagerPropertyFilesConfig {
                 Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has running tasks.  User has chosen to override safety and proceed. "
             } else {
                 Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has the following running tasks: $($runningTasks -join ', '))."
-                Write-LogMessage -Type INFO -AppendNewLine "Please wait until these tasks complete and try again."
+                Write-LogMessage -Type INFO -AppendNewLine -Message "Please wait until these tasks complete and try again."
                 return
             }
         }
@@ -1576,7 +1585,7 @@ Function Invoke-SddcManagerPropertyFilesConfig {
             $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
 
             if ($vcf52) {
-                $scriptCommand = "egrep `"^$depotLcmProductVersionCatalogDir=$newProductCatalogValue|^$depotFqdnConfig=$newDepotFqdn|^$depotFqdnConfig=$newDepotFqdn|^$depotRepoDir=$newRepoDirValue|^$depotLcmManifestDir=$newLcmManifestDirValue|^$depotPathConfig=$newDepotPath`" $remoteSddcManagerLcmPropertiesFile | wc -l"
+                $scriptCommand = "egrep `"^$depotLcmProductVersionCatalogDir=$newProductCatalogValue|^$depotFqdnConfig=$newDepotFqdn|^$depotRepoDir=$newRepoDirValue|^$depotLcmManifestDir=$newLcmManifestDirValue|^$depotPathConfig=$newDepotPath`" $remoteSddcManagerLcmPropertiesFile | wc -l"
                 $expectedResults="5"
             } else {
                 $scriptCommand = "egrep `"^$depotFqdnConfig=$newDepotFqdn|^$depotRepoDir=$newRepoDirValue|^$depotLcmManifestDir=$newLcmManifestDirValue|^$depotPathConfig=$newDepotPath`" $remoteSddcManagerLcmPropertiesFile | wc -l"
@@ -1600,10 +1609,10 @@ Function Invoke-SddcManagerPropertyFilesConfig {
                 Start-Sleep $serviceRestartWaitSeconds
 
                 # Verify that the LCM service has restarted properly before continuing.
-                Invoke-SddcManagerServiceCheck -GuestVm $sddcManagerVmName -GuestUser root -GuestPassword $sddcManagerRootPassword -Service lcm
+                $serviceCheckResult = Invoke-SddcManagerServiceCheck -GuestVm $sddcManagerVmName -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -Service lcm
 
-                if ($?) {
-                    # Revert regex on directory for human readable output
+                if ($serviceCheckResult -eq 0) {
+                    # Revert regex on directory for human readable output.
                     $results = $newDepotPath.Replace("\/", "/")
                     $newDepotPath = $results
                     Write-LogMessage -Type INFO -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has been successfully updated with the new depot location `"$newDepotFqdn$newDepotPath`"."
@@ -1619,52 +1628,53 @@ Function Invoke-SddcManagerPropertyFilesConfig {
             $expectedResults="2"
 
             $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
-                if ([int]$results.ScriptOutput -eq [int]$expectedResults) {
-                    Write-LogMessage -Type WARNING -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" does not require an update to the operations manager service."
-                } else {
-                    Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning SDDC Manager `"$($sddcConnection.Name)`" operations manager update..."
-
-            # Ensure a backup of operations manager property file exists on SDDC manager.
-            $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $operationsPropertiesBackupConfigCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
-
-            if (-not $results) {
-                Write-LogMessage -Type Error -AppendNewLine -Message "Unexpected error backing up configuration on SDDC Manager: $($Error[0].Exception.Message)"
-                return
-            }
-
-            # Update the operations manager configuration.
-            $scriptCommand = "grep -q `"^$proxyConfigValidationHttpCodeParameter`" $remoteSddcManagerOperationPropertiesFile || echo `"$proxyConfigValidationHttpCodeParameter=$proxyConfigValidationHttpCodeValue`" >> $remoteSddcManagerOperationPropertiesFile"
-            $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
-
-            $scriptCommand = "grep -q `"^$proxyConfigValidationTestUrlParameter`" $remoteSddcManagerOperationPropertiesFile || echo `"$proxyConfigValidationTestUrlParameter=$proxyConfigValidationTestUrlValue`" >> $remoteSddcManagerOperationPropertiesFile"
-            $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
-
-            # Verify the exact configuration is in place.
-            $scriptCommand = "egrep `"^$proxyConfigValidationHttpCodeParameter=$proxyConfigValidationHttpCodeValue|^$proxyConfigValidationTestUrlParameter=$proxyConfigValidationTestUrlValue`" $remoteSddcManagerOperationPropertiesFile | wc -l"
-            $expectedResults="2"
-
-            $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
             if ([int]$results.ScriptOutput -eq [int]$expectedResults) {
-                # The configuration was successfully applied, we can restart operations manager.
-                $scriptCommand = 'systemctl restart operationsmanager'
-                $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
-
-                # Wait before checking if the service has restarted correctly.
-                Write-LogMessage -Type DEBUG -Message "Waiting $serviceRestartWaitSeconds seconds for operationsmanager service to restart..."
-                Start-Sleep $serviceRestartWaitSeconds
-
-                # Verify that the operationsmanager service has restarted properly before continuing.
-                Invoke-SddcManagerServiceCheck -GuestVm $sddcManagerVmName -GuestUser root -GuestPassword $sddcManagerRootPassword -Service operationsmanager
-
-                if ($?) {
-                    Write-LogMessage -Type INFO -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has been successfully updated to support optional proxy configurations."
-                }
+                Write-LogMessage -Type WARNING -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" does not require an update to the operations manager service."
             } else {
-                # Encountering unexpected results should trigger a revert to the backup file.
-                $scriptCommand = "cp -an $backupSddcManagerOperationPropertiesFile $remoteSddcManagerOperationPropertiesFile"
+                Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning SDDC Manager `"$($sddcConnection.Name)`" operations manager update..."
+
+                # Ensure a backup of operations manager property file exists on SDDC manager.
+                $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $operationsPropertiesBackupConfigCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
+
+                if (-not $results) {
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Unexpected error backing up configuration on SDDC Manager operations properties."
+                    return
+                }
+
+                # Update the operations manager configuration.
+                $scriptCommand = "grep -q `"^$proxyConfigValidationHttpCodeParameter`" $remoteSddcManagerOperationPropertiesFile || echo `"$proxyConfigValidationHttpCodeParameter=$proxyConfigValidationHttpCodeValue`" >> $remoteSddcManagerOperationPropertiesFile"
                 $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
-                Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" operations manager configuration was not updated successfully. Automatically reverting to backup.  Please contact support."
-                return
+
+                $scriptCommand = "grep -q `"^$proxyConfigValidationTestUrlParameter`" $remoteSddcManagerOperationPropertiesFile || echo `"$proxyConfigValidationTestUrlParameter=$proxyConfigValidationTestUrlValue`" >> $remoteSddcManagerOperationPropertiesFile"
+                $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
+
+                # Verify the exact configuration is in place.
+                $scriptCommand = "egrep `"^$proxyConfigValidationHttpCodeParameter=$proxyConfigValidationHttpCodeValue|^$proxyConfigValidationTestUrlParameter=$proxyConfigValidationTestUrlValue`" $remoteSddcManagerOperationPropertiesFile | wc -l"
+                $expectedResults="2"
+
+                $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
+                if ([int]$results.ScriptOutput -eq [int]$expectedResults) {
+                    # The configuration was successfully applied, we can restart operations manager.
+                    $scriptCommand = 'systemctl restart operationsmanager'
+                    $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
+
+                    # Wait before checking if the service has restarted correctly.
+                    Write-LogMessage -Type DEBUG -Message "Waiting $serviceRestartWaitSeconds seconds for operationsmanager service to restart..."
+                    Start-Sleep $serviceRestartWaitSeconds
+
+                    # Verify that the operationsmanager service has restarted properly before continuing.
+                    $serviceCheckResult = Invoke-SddcManagerServiceCheck -GuestVm $sddcManagerVmName -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -Service operationsmanager
+
+                    if ($serviceCheckResult -eq 0) {
+                        Write-LogMessage -Type INFO -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" has been successfully updated to support optional proxy configurations."
+                    }
+                } else {
+                    # Encountering unexpected results should trigger a revert to the backup file.
+                    $scriptCommand = "cp -an $backupSddcManagerOperationPropertiesFile $remoteSddcManagerOperationPropertiesFile"
+                    $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" operations manager configuration was not updated successfully. Automatically reverting to backup.  Please contact support."
+                    return
+                }
             }
         }
 
@@ -1678,7 +1688,7 @@ Function Invoke-SddcManagerPropertyFilesConfig {
         Write-LogMessage -Type INFO -AppendNewLine -Message "Please wait 5-10 minutes and then you may validate that you can download VCF packages using the new depot."
         return
     }
-    }
+    } # end switch ($Action)
 }
 Function Disconnect-Vcenter {
 
@@ -1854,12 +1864,12 @@ Function Invoke-VcenterApplianceDepotConfig {
     try {
         $existingVcenterApplianceUpdatePolicy = $systemUpdateApi.get()
     } catch [Exception] {
-        if ($($Error[0].Exception.Message) -match "Unable to authorize user") {
+        if ($($_.Exception.Message) -match "Unable to authorize user") {
             Write-LogMessage -Type ERROR -AppendNewLine -Message "User does not have the necessary permissions `"$Vcenter`" to update the vCenter Appliance depot."
             Write-LogMessage -Type INFO -Message "Please re-run this script with a user with `"com.vmware.appliance.update.policy.get (operator)`""
             Write-LogMessage -Type INFO -AppendNewLine -Message "and `"com.vmware.appliance.update.policy.set (administrator) permissions.`""
         } else {
-            Write-LogMessage -Type ERROR -AppendNewLine -Message "Error checking system update policy for vCenter `"$Vcenter`" : $($Error[0].Exception.Message)"
+            Write-LogMessage -Type ERROR -AppendNewLine -Message "Error checking system update policy for vCenter `"$Vcenter`" : $($_.Exception.Message)"
         }
     }
     if (-not $existingVcenterApplianceUpdatePolicy) {
@@ -1867,18 +1877,18 @@ Function Invoke-VcenterApplianceDepotConfig {
         return
     }
 
-    if ($Action -eq "Check") {
-
-            if ($null -eq $existingVcenterApplianceUpdatePolicy.custom_url) {
-                Write-LogMessage -Type INFO -AppendNewLine -Message "vCenter Appliance `"$Vcenter`" is configured with the default depot."
-            } else {
-                Write-LogMessage -Type INFO -AppendNewLine -Message "vCenter Appliance `"$Vcenter`" is configured with with custom depot `"$($existingVcenterApplianceUpdatePolicy.custom_url)`"."
-            }
-        } elseif ($Action -eq "Update") {
-
+    switch ($Action) {
+    "Check" {
+        if ($null -eq $existingVcenterApplianceUpdatePolicy.custom_url) {
+            Write-LogMessage -Type INFO -AppendNewLine -Message "vCenter Appliance `"$Vcenter`" is configured with the default depot."
+        } else {
+            Write-LogMessage -Type INFO -AppendNewLine -Message "vCenter Appliance `"$Vcenter`" is configured with with custom depot `"$($existingVcenterApplianceUpdatePolicy.custom_url)`"."
+        }
+    }
+    "Update" {
             $newVcenterApplianceUpdatePolicy = $systemUpdateApi.help.set.policy.Create()
 
-            if ($Action -eq "Update") {
+            if ($true) {
 
                 # Derive full version to complete URL
                 $systemUpdateApiVersionQuery = Get-CisService -Name 'com.vmware.appliance.system.version' -Server $Vcenter -ErrorAction SilentlyContinue
@@ -1893,10 +1903,11 @@ Function Invoke-VcenterApplianceDepotConfig {
 
                 # Each major version of vCenter will match a ToT version, thus we can just match the first
                 # character of each string.
+                $versionMatch = $false
                 foreach ($totVcenterVersion in $totVcenterVersions) {
                     if ($totVcenterVersion[0] -match $vcenterFullVersion[0]) {
                         $fullDepotPath = "$newDepotPrefix/$totVcenterVersion"
-                        $versionMatch=$true
+                        $versionMatch = $true
                     }
                 }
 
@@ -1926,12 +1937,12 @@ Function Invoke-VcenterApplianceDepotConfig {
             try {
                 $systemUpdateApi.set($newVcenterApplianceUpdatePolicy)
             } catch [Exception] {
-                if ($($Error[0].Exception.Message) -match "Unable to authorize user") {
+                if ($($_.Exception.Message) -match "Unable to authorize user") {
                     Write-LogMessage -Type ERROR -Message "User does not have the necessary permission on vCenter `"$Vcenter`" to update the vCenter Appliance depot."
                     Write-LogMessage -Type INFO -Message "Please re-run this script with a user with `"com.vmware.appliance.update.policy.get`" and"
                     Write-LogMessage -Type INFO -AppendNewLine -Message "`"com.vmware.appliance.update.policy.set permissions`"."
                 } else {
-                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Error checking system update policy for vCenter `"$Vcenter`" : $($Error[0].Exception.Message)"
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Error checking system update policy for vCenter `"$Vcenter`" : $($_.Exception.Message)"
                 }
             }
 
@@ -1941,8 +1952,9 @@ Function Invoke-VcenterApplianceDepotConfig {
                 Write-LogMessage -Type INFO -AppendNewLine -Message "`"$Vcenter`" vCenter Appliance has been configured to use depot `"$($vcenterApplianceUpdatePolicy.custom_url)`"."
                 Write-LogMessage -Type INFO -AppendNewLine -Message "Please wait 5-10 minutes and check the vCenter Appliance for new updates."
             }
-        }
     }
+    } # end switch ($Action)
+}
 Function Update-DefaultVcenterSystemDepots {
 
     <#
@@ -1988,7 +2000,7 @@ Function Update-DefaultVcenterSystemDepots {
     try {
         $depots = Invoke-ListDepotsOnline -ErrorAction SilentlyContinue -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter} )
     } catch [Exception] {
-        Write-LogMessage -Type ERROR -SuppressOutputToScreen -Message "Error invoking Invoke-ListDepotsOnline -Server on vCenter `"$Vcenter`" : $($Error[0])"
+        Write-LogMessage -Type ERROR -SuppressOutputToScreen -Message "Error invoking Invoke-ListDepotsOnline -Server on vCenter `"$Vcenter`" : $($_.Exception.Message)"
     }
 
     if (-not $depots) {
@@ -2078,7 +2090,8 @@ Function Invoke-VcenterHostDepotConfig {
         return
     }
 
-    if ( $Action -eq "Check" ) {
+    switch ($Action) {
+    "Check" {
         $depotsEnabled=0
 
         foreach ($depot in $allDepots.GetEnumerator()) {
@@ -2096,7 +2109,8 @@ Function Invoke-VcenterHostDepotConfig {
         if ([int]$depotsEnabled -eq 0 ) {
             Write-LogMessage -Type WARNING -AppendNewLine -Message "vCenter `"$Vcenter`" has no enabled default or custom VMware depots."
         }
-    } elseif ( $Action -eq "Update" ) {
+    }
+    "Update" {
         # Method itself is idempotent, and thus will only try to change host state if
         # not already in desired stated.
         Update-DefaultVcenterSystemDepots -Vcenter $Vcenter
@@ -2112,23 +2126,23 @@ Function Invoke-VcenterHostDepotConfig {
             # results in replacing, the custom depot by calling the update, rather than create cmdlet (through a delete/insert operation)
 
             foreach ($depot in $allDepots.GetEnumerator()) {
-                # Only perform check against non-system URLs
+                # Only perform check against non-system URLs.
                 if (-not $($($depot.Value).SystemDefined)) {
-                    # Fast-fail if the custom depot has already been configured
+                    # Fast-fail if the custom depot has already been configured.
                     if ($($($depot.Value).Location) -match $downloadToken) {
                         if ( $($($depot.Value).Location) -eq $($newDepot.Url)) {
                             Write-LogMessage -Type WARNING -AppendNewLine -Message "$($newDepot.Url) has already been added as an ESX Depot to `"$Vcenter`".  No changes are required."
                             $depotActionsComplete = $true
                         }
                     } else {
-                        # Check if an existing non-system depot matches the description of the repo we're adding, but with a
-                        # different URL, although one within the allow-list of LCM Domains
+                        # Check if an existing non-system depot matches the description of the repo we're adding,
+                        # but with a different URL, although one within the allow-list of LCM Domains.
                         if (($($depot.Value).Description) -eq $($newDepot.Description)) {
-
-                        foreach ($lcmDomain in $lcmDomains) {
-                            if ($($depot.Value.Location) -match "^https://$lcmDomain") {
-                                Write-LogMessage -Type INFO -AppendNewLine -Message "Older custom depot detected on `"$Vcenter`". Deleting custom repo `"$($depot.Value.Description)`" with URL `"$($depot.Value.Location)`"."
-                                Invoke-DeleteDepotOnline  -Confirm:$false -Depot $($depot.Key) -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter} )
+                            foreach ($lcmDomain in $lcmDomains) {
+                                if ($($depot.Value.Location) -match "^https://$lcmDomain") {
+                                    Write-LogMessage -Type INFO -AppendNewLine -Message "Older custom depot detected on `"$Vcenter`". Deleting custom repo `"$($depot.Value.Description)`" with URL `"$($depot.Value.Location)`"."
+                                    Invoke-DeleteDepotOnline  -Confirm:$false -Depot $($depot.Key) -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter} )
+                                }
                             }
                         }
                     }
@@ -2170,13 +2184,13 @@ Function Invoke-VcenterHostDepotConfig {
                 $syncNeeded = $true
             }
         }
-    }
         if ($syncNeeded) {
             $taskId = Invoke-SyncDepotsAsync -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter } )
             Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning sync of new ESX host depots for vCenter `"$Vcenter`" (This will complete in the background)."
             Write-LogMessage -Type DEBUG -Message "If required for debugging, the task ID for vCenter `"$Vcenter`" depot sync is `"$taskId`"."
         }
     }
+    } # end switch ($Action)
 }
 Function Select-DownloadToken {
 
@@ -2192,7 +2206,7 @@ Function Select-DownloadToken {
         Select-DownloadToken
     #>
 
-    if ($Script:Headless -eq "disabled") {
+    if (-not $Script:Headless) {
         Do {
             Test-EndPointConnections
             $Script:DownloadTokenMenuInterface = Read-Host "Enter your Broadcom download token or press 'c' to cancel"
@@ -2325,13 +2339,13 @@ Function Set-DepotConfiguration {
         if ($vcenterConnections) {
             foreach ($vcenter in ($vcenterConnections | Where-Object IsConnected)) {
                 Invoke-VcenterApplianceDepotConfig -Vcenter $vcenter -Action Update -NewDepotPrefix $newVcenterApplianceDepotPrefix -TotVcenterVersions $($depotConfig.TotVcenterVersions)
-                if ($Script:LogOnly -eq "disabled") {
-                Write-Output "==========`n"
-            }
+                if (-not $Script:LogOnly) {
+                    Write-Output "==========`n"
+                }
 
                 Invoke-VcenterHostDepotConfig -Vcenter $vcenter -Action Update -NewDepots $hostDepotArray -LcmDomains $($depotConfig.LcmDomains) -DownloadToken $downloadToken
-                if ($Script:LogOnly -eq "disabled") {
-                Write-Output "==========`n"
+                if (-not $Script:LogOnly) {
+                    Write-Output "==========`n"
                 }
             }
         }
@@ -2345,7 +2359,7 @@ Function Set-DepotConfiguration {
         $sddcManagerVersion = Get-SddcManagerVersion
         if ([version]$sddcManagerVersion -le [version]$vcf52Release) {
             Invoke-SddcManagerPropertyFilesConfig -Action Update -NewDepotFqdn $($depotConfig.DepotFqdn) -NewDepotPath $($depotConfig.SddcManagerBasePath) -NewRepoDirValue $($depotConfig.SddcManagerRepoDir) -NewLcmManifestDirValue $($depotConfig.SddcManagerLcmManifestDir) -NewProductCatalogValue $($depotConfig.SddcManagerProductCatalog) -DownloadToken $downloadToken -NewProxyHttpStatuses $($depotConfig.SddcManagerProxyStatuses)
-            if ($Script:LogOnly -eq "disabled") {
+            if (-not $Script:LogOnly) {
                 Write-Output "==========`n"
             }
         } else {
@@ -2386,7 +2400,7 @@ Function Show-DepotConfiguration {
         $sddcManagerVersion = Get-SddcManagerVersion
         if ([version]$sddcManagerVersion -le [version]$vcf52Release) {
             Invoke-SddcManagerPropertyFilesConfig -Action Check
-            if ($Script:LogOnly -eq "disabled") {
+            if (-not $Script:LogOnly) {
                 Write-Output "==========`n"
             }
         }
@@ -2397,12 +2411,12 @@ Function Show-DepotConfiguration {
         foreach ($vcenter in ($vcenterConnections | Where-Object IsConnected)) {
 
             Invoke-VcenterApplianceDepotConfig -Vcenter $vcenter -Action Check -NewDepotSuffix $newVcenterApplianceDepotSuffix
-            if ($Script:LogOnly -eq "disabled") {
-            Write-Output "==========`n"
-        }
+            if (-not $Script:LogOnly) {
+                Write-Output "==========`n"
+            }
             Invoke-VcenterHostDepotConfig -Vcenter $vcenter -Action Check
-            if ($Script:LogOnly -eq "disabled") {
-            Write-Output "==========`n"
+            if (-not $Script:LogOnly) {
+                Write-Output "==========`n"
             }
         }
     }
@@ -2617,10 +2631,10 @@ Function Connect-VcfVcenters {
     try {
         $response = (Invoke-VcfGetDomains).Elements | Sort-Object
     } catch [Exception] {
-        if ($Error[0].Exception.Message -match "TOKEN_NOT_FOUND") {
+        if ($_.Exception.Message -match "TOKEN_NOT_FOUND") {
             Write-LogMessage -Type ERROR -AppendNewLine -Message "Not connected to an SDDC Manager, please reconnect."
         } else {
-            Write-LogMessage -Type ERROR -AppendNewLine "Unexpected error retrieving VCF Domain List: $($Error[0].Exception.Message)"
+            Write-LogMessage -Type ERROR -AppendNewLine -Message "Unexpected error retrieving VCF Domain List: $($_.Exception.Message)"
         }
     }
     if (-not $response) {
@@ -2632,7 +2646,7 @@ Function Connect-VcfVcenters {
     if ([String]::IsNullOrEmpty($response)) {
         Write-LogMessage -Type ERROR -AppendNewLine -Message "Unable to list VCF Workload Domains: $($Error[0])"
         Show-AnyKey
-        break
+        return
     }
 
     # Determine the management SSO domain.
@@ -2640,23 +2654,24 @@ Function Connect-VcfVcenters {
 
     # Verify the user has sufficient permissions to pull vCenter credentials from SDDC Manager.
     # Operator and Viewer do not have access to SSO credentials.
+    $accessDenied = $false
     try {
         $mgmtSsoDomainElements = (Invoke-VcfGetCredentials -accountType SYSTEM -ResourceType PSC).Elements | Where-Object { $_.Resource.DomainName -eq $($mgmtDomain.Name) -and $_.Username -match "@$($mgmtDomain.SsoName)" }
     }
     catch {
-        if ($($Error[0]) -match "Forbidden") {
-            $accessDenied = 'true'
+        if ($($_.Exception.Message) -match "Forbidden") {
+            $accessDenied = $true
         }
     }
     if (-not $mgmtSsoDomainElements) {
-        if ($accessDenied -eq 'true') {
+        if ($accessDenied) {
             Write-LogMessage -Type ERROR -AppendNewLine -Message "Your SDDC Manager SSO user does not have sufficient access. Please reconnect to SDDC Manager as a user with the ADMIN role."
         } else {
             $sddcName = if ($sddcConnection) { $sddcConnection.Name } else { "Unknown" }
             Write-LogMessage -Type ERROR -AppendNewLine -Message "Cannot retrieve vCenter credentials from SDDC Manager `"$sddcName`"."
         }
         Show-AnyKey
-        if ($Script:Headless -eq "disabled") {
+        if (-not $Script:Headless) {
             Show-MainMenu
         } else {
             Exit-WithCode -exitCode $Script:ExitCodes.AUTHENTICATION_ERROR -message "Insufficient permissions to retrieve vCenter credentials"
@@ -2698,10 +2713,10 @@ Function Connect-VcfVcenters {
 
         if ($connectedToVcenterServer) {
             $vcenterVersion = Get-VcenterVersion $vcenter
-            if ([double]$vcenterVersion -lt [double]$minimumVcenterRelease) {
+            if ([version]$vcenterVersion -lt [version]$minimumVcenterRelease) {
                 Write-LogMessage -Type ERROR -PrependNewLine -AppendNewLine -Message "`"$vcenter`" is at $vcenterVersion which is less than the minimum release of $minimumVcenterRelease required by this script"
                 Write-LogMessage -Type INFO -AppendNewLine -Message "Disconnecting from incompatible vCenter `"$vcenter`"."
-                Disconnect-Vcenter -Vcenter $vcenter
+                Disconnect-Vcenter -ServerName $vcenter
                 $disconnectedVcenter = $true
             }
         }
@@ -2748,9 +2763,9 @@ Function Show-Version {
     )
 
     if (-not $silence) {
-        Write-LogMessage -type INFO -message "Version: $scriptVersion"
+        Write-LogMessage -Type INFO -Message "Version: $scriptVersion"
     } else {
-        Write-LogMessage -Type DEBUG -message "Version: $scriptVersion"
+        Write-LogMessage -Type DEBUG -Message "Version: $scriptVersion"
     }
 }
 Function Select-EndpointType {
@@ -2880,22 +2895,26 @@ Function Disconnect-SddcManager {
 
         # Check if the user chose option 0, yes do disconnect from vCenter.
         if (($decision -eq 0) -or ($noPrompt)) {
+            $disconnectSuccess = $false
+            $disconnectError = $null
             try {
-                Disconnect-VcfSddcManagerServer -Server $sddcConnection.Name
+                Disconnect-VcfSddcManagerServer -Server $sddcConnection.Name -ErrorAction Stop
+                $disconnectSuccess = $true
             } catch [Exception] {
-                Write-LogMessage -Type DEBUG -Message "Exception during SDDC Manager disconnect: $($_.Exception.Message)"
+                $disconnectError = $_.Exception.Message
+                Write-LogMessage -Type DEBUG -Message "Exception during SDDC Manager disconnect: $disconnectError"
             }
-            if ($?) {
+            if ($disconnectSuccess) {
                 if ($silence) {
                     Write-LogMessage -Type DEBUG -Message "Successfully disconnected from SDDC Manager `"$sddcManagerFqdn`"."
                 } else {
                     Write-LogMessage -Type INFO -AppendNewLine -Message "Successfully disconnected from SDDC Manager `"$sddcManagerFqdn`"."
                 }
             } else {
-                if ( ($Error[0].Exception.Message) -match "The request was canceled due to the configured HttpClient.Timeout") {
+                if ($disconnectError -match "The request was canceled due to the configured HttpClient.Timeout") {
                     Write-LogMessage -Type ERROR -AppendNewLine -Message "Failed to disconnect from SDDC Manager `"$sddcManagerFqdn`", as it is not reachable from this script execution system."
                 } else {
-                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Failed to disconnect from SDDC Manager `"$sddcManagerFqdn`" : $($Error[0].Exception.Message)."
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Failed to disconnect from SDDC Manager `"$sddcManagerFqdn`" : $disconnectError."
                 }
             }
         } else {
@@ -2948,17 +2967,17 @@ Function Get-Preconditions {
         Get-Preconditions
    #>
 
-    # Check Powershell release
+    # Check Powershell release.
     $currentPsVersion = ($PSVersionTable.PSVersion.Major),($PSVersionTable.PSVersion.Minor) -join "."
 
-    if ( $currentPsVersion -lt $psVersionMinVersion) {
+    if ( [version]$currentPsVersion -lt [version]$psVersionMinVersion) {
        Exit-WithCode -exitCode $Script:ExitCodes.PRECONDITION_ERROR -message "Powershell $psVersionMinVersion or higher is required (current: $currentPsVersion)"
     }
 
     # PowerCLI Module and Version Check
     $vcfModuleName = "VCF.PowerCLI"
 
-    $vcfPowerCliModule = (Get-Module -ListAvailable -Name $vcfModuleName -ErrorAction SilentlyContinue) | Sort-Object Revision | Select-Object -First 1
+    $vcfPowerCliModule = (Get-Module -ListAvailable -Name $vcfModuleName -ErrorAction SilentlyContinue) | Sort-Object Revision -Descending | Select-Object -First 1
 
     if (-not $vcfPowerCliModule) {
         Exit-WithCode -exitCode $Script:ExitCodes.PRECONDITION_ERROR -message "VCF.PowerCLI module not found. Please install it"
@@ -3040,21 +3059,18 @@ Function Show-MainMenu {
                 Clear-Host
                 Select-EndpointType
                 Show-AnyKey
-                Show-MainMenu
             }
             2
             {
                 Clear-Host
                 Select-DownloadToken
                 Show-AnyKey
-                Show-MainMenu
             }
             3
             {
                 Clear-Host
                 Show-DepotConfiguration
                 Show-AnyKey
-                Show-MainMenu
             }
             4
             {
@@ -3064,7 +3080,6 @@ Function Show-MainMenu {
                 }
                 Set-DepotConfiguration -DownloadToken $Script:DownloadTokenMenuInterface
                 Show-AnyKey
-                Show-MainMenu
             }
             5
             {
@@ -3074,7 +3089,6 @@ Function Show-MainMenu {
                 }
                 Set-DepotConfiguration -DownloadToken $Script:DownloadTokenMenuInterface -DryRun
                 Show-AnyKey
-                Show-MainMenu
             }
 
             6
@@ -3087,14 +3101,12 @@ Function Show-MainMenu {
                 }
                 Disconnect-Vcenter -AllServers
                 Show-AnyKey
-                Show-MainMenu
             }
             7
             {
                 Clear-Host
                 Show-Version
                 Show-AnyKey
-                Show-MainMenu
             }
             8
             {
@@ -3106,8 +3118,6 @@ Function Show-MainMenu {
                     Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
                 }
                 Show-AnyKey
-                Show-MainMenu
-
             }
             Q
             {
@@ -3131,17 +3141,17 @@ Function Show-MainMenu {
 }
 
 # Variables and Constants
-$ConfirmPreference = "None"
+$Script:ConfirmPreference = "None"
 $Global:ProgressPreference = 'SilentlyContinue'  # Must be Global for PowerShell to respect it
-$scriptVersion = '1.0.0.0.54'
+$scriptVersion = '1.0.0.0.55'
 $psVersionMinVersion = '7.2'
-$downloadTokenLength = '32'
+$downloadTokenLength = 32
 $minimumVcenterRelease = '7.0'
 $minimumVcfRelease = '4.5'
 $vcf52Release = '5.2'
 $vcf9xRelease = '9'
 
-$Script:LogOnly = "disabled"
+$Script:LogOnly = $false
 
 New-LogFile
 if (-not $env:SkipChecks) {
@@ -3153,11 +3163,11 @@ if ($Help) {
     Exit-WithCode -exitCode $Script:ExitCodes.SUCCESS -message "Help displayed"
 }
 
-# assume headless mode until all conditions have been checked.
-$Script:Headless = 'enabled'
+# Assume headless mode until all conditions have been checked.
+$Script:Headless = $true
 
 if ($Silence) {
-    $Script:LogOnly = "enabled"
+    $Script:LogOnly = $true
 }
 
 switch ($true) {
@@ -3245,16 +3255,19 @@ switch ($true) {
         }
     }
     $skipVcenter {
-        if ($skipVcenter -eq "Enable") {
-            Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
-            $Script:SkipVcenter=$True
-        } elseif ($skipVcenter -eq "Disable") {
-            Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
-            Write-LogMessage -Type INFO -Message "Disabling SkipVcenter mode."
-
-        } else {
-            Write-LogMessage -Type ERROR -AppendNewLine -Message "SkipVcenter parameter must be Enable or Disable."
-            Exit-WithCode -exitCode $Script:ExitCodes.PARAMETER_ERROR -message "SkipVcenter parameter must be Enable or Disable"
+        switch ($skipVcenter) {
+            "Enable" {
+                Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
+                $Script:SkipVcenter = $true
+            }
+            "Disable" {
+                Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
+                Write-LogMessage -Type INFO -Message "Disabling SkipVcenter mode."
+            }
+            Default {
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "SkipVcenter parameter must be Enable or Disable."
+                Exit-WithCode -exitCode $Script:ExitCodes.PARAMETER_ERROR -message "SkipVcenter parameter must be Enable or Disable"
+            }
         }
     }
     $update {
@@ -3270,7 +3283,7 @@ switch ($true) {
     Show-Version
     }
     Default {
-    $Script:Headless = 'disabled'
+    $Script:Headless = $false
     Show-MainMenu
     }
 }
