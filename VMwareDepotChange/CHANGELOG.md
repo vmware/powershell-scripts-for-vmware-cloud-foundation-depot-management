@@ -1,3 +1,7 @@
+## 1.0.0.0.55
+
+* Misc bug fixes to improve reliability
+
 ## 1.0.0.0.54
 
 * Removed legacy VMware.PowerCLI 13.3 support (VCF.PowerCLI 9 now required).
