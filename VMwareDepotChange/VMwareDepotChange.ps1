@@ -33,11 +33,12 @@
 #
 # This script is intended to help users transition to the new VMware by Broadcom depot structures.
 #
-# Last modified: 2026-04-24
+# Last modified: 2026-06-10
 # KB: https://knowledge.broadcom.com/external/article/389276
 #
 Param (
     [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$check,
+    [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$collectLogs,
     [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$connect,
     [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [ValidateLength(32, 32)] [ValidatePattern('^[a-zA-Z0-9]{32}$')] [String]$downloadToken,
     [Parameter(Mandatory = $false)] [ValidateNotNullOrEmpty()] [Switch]$disconnect,
@@ -885,6 +886,8 @@ Function Exit-WithCode {
     # Log the exit code for debugging
     Write-LogMessage -Type DEBUG -Message "Script exiting with code $exitCode"
 
+    Remove-Variable -Name SddcManagerRootPassword -Scope Global -ErrorAction SilentlyContinue
+
     # Exit with the specified code
     exit $exitCode
 }
@@ -1262,6 +1265,7 @@ Function Invoke-SddcManagerServiceCheck {
         [Parameter(Mandatory = $true)] [SecureString]$guestPassword,
         [Parameter(Mandatory = $true)] [String]$guestUser,
         [Parameter(Mandatory = $true)] [String]$guestVm,
+        [Parameter(Mandatory = $false)] [ValidateRange(1, 360)] [Int]$maxPollAttempts = 60,
         [Parameter(Mandatory = $true)] [String]$service
 	)
 
@@ -1289,6 +1293,10 @@ Function Invoke-SddcManagerServiceCheck {
                 }
                 Start-Sleep 20
                 $pollLoopCounter ++
+                if ($pollLoopCounter -ge $maxPollAttempts) {
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager service `"$Service`" on `"$sddcName`" did not recover after $($maxPollAttempts * 20) seconds. Verify service health manually."
+                    return 1
+                }
             }
         }
         While ($results.ScriptOutput.Contains("502"))
@@ -1584,6 +1592,14 @@ Function Invoke-SddcManagerPropertyFilesConfig {
 
             $results = Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
 
+            if (-not $results) {
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "VMware Tools returned no output when running the sed configuration update on SDDC Manager `"$($sddcConnection.Name)`". Attempting revert."
+                $scriptCommand = "cp -an $backupSddcManagerLcmPropertiesFile $remoteSddcManagerLcmPropertiesFile"
+                Invoke-VMScript -VM $sddcManagerVmName -Server $sddcManagerVcenter -ScriptText $scriptCommand -GuestUser root -GuestPassword $Global:SddcManagerRootPassword -ErrorAction SilentlyContinue
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "SDDC Manager `"$($sddcConnection.Name)`" configuration was not updated. Please contact support."
+                return
+            }
+
             if ($vcf52) {
                 $scriptCommand = "egrep `"^$depotLcmProductVersionCatalogDir=$newProductCatalogValue|^$depotFqdnConfig=$newDepotFqdn|^$depotRepoDir=$newRepoDirValue|^$depotLcmManifestDir=$newLcmManifestDirValue|^$depotPathConfig=$newDepotPath`" $remoteSddcManagerLcmPropertiesFile | wc -l"
                 $expectedResults="5"
@@ -1772,14 +1788,17 @@ Function Disconnect-Vcenter {
     }
 
     # Double check that all servers are disconnected.
-    if ($null -eq $Global:DefaultVIServer) {
+    # Get-Variable is used instead of direct $Global: access to avoid a strict-mode error
+    # when PowerCLI has never been loaded and the variable was never set.
+    $defaultViServer = Get-Variable -Name DefaultVIServer -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -eq $defaultViServer) {
         if ($silence) {
             Write-LogMessage -Type DEBUG -Message "Successfully disconnected from all vCenter and ESX hosts"
-                } else {
-            Write-LogMessage -Type INFO -Message "Successfully disconnected from all vCenter and ESX hosts"
-            }
         } else {
-        Write-LogMessage -Type INFO -Message "Failed to disconnect all vCenter and ESX hosts: $Global:DefaultVIServer"
+            Write-LogMessage -Type INFO -Message "Successfully disconnected from all vCenter and ESX hosts"
+        }
+    } else {
+        Write-LogMessage -Type INFO -Message "Failed to disconnect all vCenter and ESX hosts: $defaultViServer"
         Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message "Failed to disconnect from all vCenter and ESX hosts"
     }
 }
@@ -1895,7 +1914,7 @@ Function Invoke-VcenterApplianceDepotConfig {
 
                 if (-not $systemUpdateApiVersionQuery) {
                     Write-LogMessage -Type ERROR -AppendNewLine -Message "Could not retrieve vCenter Appliance management policy for vCenter `"$Vcenter`"."
-                    Exit-WithCode -exitCode $Script:ExitCodes.OPERATION_FAILED -message "Could not retrieve vCenter Appliance management policy"
+                    return
                 }
 
                 $policy = $systemUpdateApiVersionQuery.get()
@@ -1948,9 +1967,13 @@ Function Invoke-VcenterApplianceDepotConfig {
 
             $vcenterApplianceUpdatePolicy = $systemUpdateApi.get()
 
-            if ($($vcenterApplianceUpdatePolicy.custom_url)) {
+            if ($vcenterApplianceUpdatePolicy.custom_url -eq $fullDepotPath) {
                 Write-LogMessage -Type INFO -AppendNewLine -Message "`"$Vcenter`" vCenter Appliance has been configured to use depot `"$($vcenterApplianceUpdatePolicy.custom_url)`"."
                 Write-LogMessage -Type INFO -AppendNewLine -Message "Please wait 5-10 minutes and check the vCenter Appliance for new updates."
+            } elseif ($vcenterApplianceUpdatePolicy.custom_url) {
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "`"$Vcenter`" vCenter Appliance depot URL `"$($vcenterApplianceUpdatePolicy.custom_url)`" does not match expected `"$fullDepotPath`". The update may not have been applied correctly."
+            } else {
+                Write-LogMessage -Type ERROR -AppendNewLine -Message "`"$Vcenter`" vCenter Appliance depot URL could not be verified after update."
             }
     }
     } # end switch ($Action)
@@ -1983,14 +2006,9 @@ Function Update-DefaultVcenterSystemDepots {
     $vcenterReachability = Test-VcenterReachability -vcenter $vcenter
         # Only continue if vCenter is available
         if ($vcenterReachability -eq "Unavailable") {
-            # We use this verb in user output
-            $Action = $Action.ToLower()
-            Write-LogMessage -Type ERROR -AppendNewLine -Message "vCenter `"$Vcenter`" is not reachable from this script execution system.  Skipping $Action action for `"$Vcenter`" default ESX depots."
+            Write-LogMessage -Type ERROR -AppendNewLine -Message "vCenter `"$Vcenter`" is not reachable from this script execution system.  Skipping update action for `"$Vcenter`" default ESX depots."
             return
     }
-
-    # We use this verb in user output
-    $Action = $Action.ToLower()
 
     # Disable built-in depots.
     $settingsDepotsOnlineUpdateSpec = Initialize-EsxSettingsDepotsOnlineUpdateSpec -Enabled $false
@@ -2109,6 +2127,17 @@ Function Invoke-VcenterHostDepotConfig {
         if ([int]$depotsEnabled -eq 0 ) {
             Write-LogMessage -Type WARNING -AppendNewLine -Message "vCenter `"$Vcenter`" has no enabled default or custom VMware depots."
         }
+
+        if ($newDepots) {
+            foreach ($expectedDepot in $newDepots) {
+                $found = $allDepots.Values | Where-Object { $_.Description -eq $expectedDepot.Description }
+                if ($found) {
+                    Write-LogMessage -Type INFO -AppendNewLine -Message "Required depot `"$($expectedDepot.Description)`" is present on vCenter `"$Vcenter`"."
+                } else {
+                    Write-LogMessage -Type WARNING -AppendNewLine -Message "Required depot `"$($expectedDepot.Description)`" is missing from vCenter `"$Vcenter`". Run option 4 to update depot configurations."
+                }
+            }
+        }
     }
     "Update" {
         # Method itself is idempotent, and thus will only try to change host state if
@@ -2141,53 +2170,68 @@ Function Invoke-VcenterHostDepotConfig {
                             foreach ($lcmDomain in $lcmDomains) {
                                 if ($($depot.Value.Location) -match "^https://$lcmDomain") {
                                     Write-LogMessage -Type INFO -AppendNewLine -Message "Older custom depot detected on `"$Vcenter`". Deleting custom repo `"$($depot.Value.Description)`" with URL `"$($depot.Value.Location)`"."
-                                    Invoke-DeleteDepotOnline  -Confirm:$false -Depot $($depot.Key) -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter} )
+                                    try {
+                                        Invoke-DeleteDepotOnline -Confirm:$false -Depot $($depot.Key) -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter }) -ErrorAction Stop
+                                        $allDepots = Invoke-ListDepotsOnline -ErrorAction SilentlyContinue -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter })
+                                    } catch {
+                                        Write-LogMessage -Type ERROR -AppendNewLine -Message "Failed to delete stale depot `"$($depot.Value.Description)`" from vCenter `"$Vcenter`". Skipping create for this depot. Error: $($_.Exception.Message)."
+                                        $depotActionsComplete = $true
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
-        if (-not $depotActionsComplete) {
 
-            # Proceed with create new repo step
-            # Create a depot settings spec for create/delete operations.
-            $settingsDepotsOnlineCreateSpec = Initialize-EsxSettingsDepotsOnlineCreateSpec -Location $($newDepot.Url) -Description $($newDepot.Description) -ErrorAction SilentlyContinue
-            if (-not $settingsDepotsOnlineCreateSpec) {
-                Write-LogMessage -Type ERROR -AppendNewLine -Message "Unable to run create a settings spec for for $($newDepot.Url) on vCenter `"$Vcenter` due to error: due to Error: $($Error[0].Exception.Message)."
-                return
-            }
-            try {
-                $response = Invoke-CreateDepotsOnline  -ErrorAction SilentlyContinue -EsxSettingsDepotsOnlineCreateSpec $settingsDepotsOnlineCreateSpec -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter} )
-            } catch [Exception] {
-                Write-LogMessage -Type DEBUG -Message "Exception in Invoke-CreateDepotsOnline: $($_.Exception.Message)"
-            }
+            if (-not $depotActionsComplete) {
 
-            if (-not $response) {
-                # vCenter will self-validate not only URL reachability, but the validity of the XML.
-                $errorMessage = $Error[0].Exception.Message
-                switch -Regex ($errorMessage) {
-                    "is not valid or cannot be reached now" {
-                        Write-LogMessage -Type ERROR -AppendNewLine -Message "$($newDepot.Url)` is invalid.  Please make sure your token is correct and re-try."
-                    }
-                    "configured HttpClient.Timeout" {
-                        Write-LogMessage -Type ERROR -AppendNewLine -Message "vCenter `"$Vcenter`" timed out when attempting to configure depot `"$($newDepot.Description)`" with URL `"$($newDepot.Url)`".  Please make sure your token is correct and re-try."
-                    }
-                    Default {
-                        Write-LogMessage -Type ERROR -AppendNewLine -Message "Exiting, cannot add $($newDepot.Url) to `"$Vcenter`" due to Error: $errorMessage"
-                    }
+                # Proceed with create new repo step.
+                # Create a depot settings spec for create/delete operations.
+                $settingsDepotsOnlineCreateSpec = Initialize-EsxSettingsDepotsOnlineCreateSpec -Location $($newDepot.Url) -Description $($newDepot.Description) -ErrorAction SilentlyContinue
+                if (-not $settingsDepotsOnlineCreateSpec) {
+                    Write-LogMessage -Type ERROR -AppendNewLine -Message "Unable to run create a settings spec for for $($newDepot.Url) on vCenter `"$Vcenter` due to error: due to Error: $($Error[0].Exception.Message)."
+                    continue
                 }
-                return
-            } else {
-                Write-LogMessage -Type INFO -AppendNewLine -Message "Adding `"$($newDepot.Description)`" to `"$Vcenter`" from `"$($newDepot.Url)`"."
-                $syncNeeded = $true
+                try {
+                    $response = Invoke-CreateDepotsOnline -ErrorAction SilentlyContinue -EsxSettingsDepotsOnlineCreateSpec $settingsDepotsOnlineCreateSpec -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter })
+                } catch [Exception] {
+                    Write-LogMessage -Type DEBUG -Message "Exception in Invoke-CreateDepotsOnline: $($_.Exception.Message)"
+                }
+
+                if (-not $response) {
+                    # vCenter will self-validate not only URL reachability, but the validity of the XML.
+                    $errorMessage = $Error[0].Exception.Message
+                    switch -Regex ($errorMessage) {
+                        "is not valid or cannot be reached now" {
+                            Write-LogMessage -Type ERROR -AppendNewLine -Message "$($newDepot.Url)` is invalid.  Please make sure your token is correct and re-try."
+                        }
+                        "configured HttpClient.Timeout" {
+                            Write-LogMessage -Type ERROR -AppendNewLine -Message "vCenter `"$Vcenter`" timed out when attempting to configure depot `"$($newDepot.Description)`" with URL `"$($newDepot.Url)`".  Please make sure your token is correct and re-try."
+                        }
+                        Default {
+                            Write-LogMessage -Type ERROR -AppendNewLine -Message "Failed to add $($newDepot.Url) to `"$Vcenter`" due to Error: $errorMessage"
+                        }
+                    }
+                    continue
+                } else {
+                    Write-LogMessage -Type INFO -AppendNewLine -Message "Adding `"$($newDepot.Description)`" to `"$Vcenter`" from `"$($newDepot.Url)`"."
+                    $syncNeeded = $true
+                }
             }
         }
         if ($syncNeeded) {
-            $taskId = Invoke-SyncDepotsAsync -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter } )
-            Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning sync of new ESX host depots for vCenter `"$Vcenter`" (This will complete in the background)."
-            Write-LogMessage -Type DEBUG -Message "If required for debugging, the task ID for vCenter `"$Vcenter`" depot sync is `"$taskId`"."
+            try {
+                $taskId = Invoke-SyncDepotsAsync -Server $($Global:DefaultViServers | Where-Object { $_.Name -eq $Vcenter }) -ErrorAction Stop
+                if ($taskId) {
+                    Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning sync of new ESX host depots for vCenter `"$Vcenter`" (This will complete in the background)."
+                    Write-LogMessage -Type DEBUG -Message "If required for debugging, the task ID for vCenter `"$Vcenter`" depot sync is `"$taskId`"."
+                } else {
+                    Write-LogMessage -Type WARNING -AppendNewLine -Message "Depot sync task was not started for vCenter `"$Vcenter`". Verify depot sync status in vCenter LCM manually."
+                }
+            } catch {
+                Write-LogMessage -Type WARNING -AppendNewLine -Message "Failed to start depot sync for vCenter `"$Vcenter`". Verify depot sync status in vCenter LCM manually. Error: $($_.Exception.Message)."
+            }
         }
     }
     } # end switch ($Action)
@@ -2727,7 +2771,7 @@ Function Connect-VcfVcenters {
 
             if (-not $response) {
                 Write-LogMessage -Type INFO -PrependNewLine -Message "Failed to connect to vCenter `"$vcenter`" through Connect-CisServer: $($Error[0].Exception.InnerException.Message)"
-                Exit-WithCode -exitCode $Script:ExitCodes.CONNECTION_ERROR -message "Failed to connect to vCenter through Connect-CisServer"
+                continue
             }
 
         }
@@ -2939,6 +2983,7 @@ Function Show-Help {
     Write-Output "Options:`n"
     Write-Output "-Check:                               # Check Current Depot Settings for all connected vCenter(s) and the SDDC Manager (if utilized)."
     Write-Output "   -Silence                           #   * Optional parameter: Silence.`n"
+    Write-Output "-CollectLogs                          # Zip up the logs folder to a timestamped archive in your home directory for support purposes.`n"
     Write-Output "-Connect                              # Connect to SDDC Manager or vCenter"
     Write-Output "   -Endpoint                          #   * Required parameter: VCF or vCenter"
     Write-Output "   -JsonInput <credential file>       #   * Optional parameter: override for credential file (default: SddcManagerCredentials.json)."
@@ -3006,6 +3051,69 @@ Function Get-Preconditions {
         }
     }
 }
+Function Invoke-CollectLogs {
+
+    <#
+        .SYNOPSIS
+        Creates a zip archive of the logs folder for support purposes.
+
+        .DESCRIPTION
+        Copies all files from the script logs folder into a timestamped zip
+        file named DepotChange-logs-<timestamp>.zip saved in the user home
+        directory.  Requires New-LogFile to have been called first so that
+        Script:LogFolder is set.
+
+        .OUTPUTS
+        [String] Full path to the created zip file, or $null on failure.
+
+        .EXAMPLE
+        Invoke-CollectLogs
+    #>
+
+    [CmdletBinding()]
+    [OutputType([String])]
+    Param ()
+
+    if ([String]::IsNullOrWhiteSpace($Script:LogFolder) -or -not (Test-Path -LiteralPath $Script:LogFolder -PathType Container)) {
+        Write-LogMessage -Type ERROR -Message "Logs folder not found: `"$Script:LogFolder`". Ensure New-LogFile has been called."
+        return $null
+    }
+
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $zipFileName = "DepotChange-logs-$stamp.zip"
+    $zipDestinationPath = Join-Path -Path $HOME -ChildPath $zipFileName
+    $stagingParent = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath "DepotChange-collect-$stamp"
+    $stagingLogs = Join-Path -Path $stagingParent -ChildPath "logs"
+
+    try {
+        $null = New-Item -ItemType Directory -Path $stagingLogs -Force -ErrorAction Stop
+
+        $logChildren = @(Get-ChildItem -LiteralPath $Script:LogFolder -Force -ErrorAction SilentlyContinue)
+        foreach ($logItem in $logChildren) {
+            $logDest = Join-Path -Path $stagingLogs -ChildPath $logItem.Name
+            Copy-Item -LiteralPath $logItem.FullName -Destination $logDest -Recurse -Force -ErrorAction Stop
+        }
+
+        if (Test-Path -LiteralPath $zipDestinationPath -PathType Leaf) {
+            Remove-Item -LiteralPath $zipDestinationPath -Force -ErrorAction Stop
+        }
+
+        Compress-Archive -Path $stagingLogs -DestinationPath $zipDestinationPath -Force -ErrorAction Stop
+
+        Write-Host ""
+        Write-Host "CollectLogs finished. Archive saved to:" -ForegroundColor Green
+        Write-Host "  $zipDestinationPath"
+    } catch {
+        Write-LogMessage -Type ERROR -Message "Failed to create log archive: $($_.Exception.Message)"
+        return $null
+    } finally {
+        if (Test-Path -LiteralPath $stagingParent) {
+            Remove-Item -LiteralPath $stagingParent -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    return $zipDestinationPath
+}
 Function Show-MainMenu {
 
     <#
@@ -3048,9 +3156,10 @@ Function Show-MainMenu {
         Write-Host -Object " 6. (Optional) Disconnect from endpoints." -ForegroundColor $foregroundColor
         Write-Host -Object " 7. (Optional) Show Version." -ForegroundColor $foregroundColor
         Write-Host -Object " 8. (Optional) (Advanced) Toggle SkipVcenter Updates Flag for VCF Environments." -ForegroundColor $foregroundColor
+        Write-Host -Object " 9. (Optional) Collect and zip logs for support." -ForegroundColor $foregroundColor
         Write-Host -Object " Q. Press Q to Quit" -ForegroundColor Cyan;
         Write-Host -Object $errout
-        $menuInput = Read-Host -Prompt '(1-8 or Q)'
+        $menuInput = Read-Host -Prompt '(1-9 or Q)'
         $menuInput = $menuInput -replace "`t|`n|`r",""
         Switch ($menuInput)
         {
@@ -3119,6 +3228,12 @@ Function Show-MainMenu {
                 }
                 Show-AnyKey
             }
+            9
+            {
+                Clear-Host
+                Invoke-CollectLogs | Out-Null
+                Show-AnyKey
+            }
             Q
             {
                 $sddcConnection = Get-Variable -Name DefaultSddcManagerConnections -ValueOnly -ErrorAction SilentlyContinue -Scope Global
@@ -3143,7 +3258,7 @@ Function Show-MainMenu {
 # Variables and Constants
 $Script:ConfirmPreference = "None"
 $Global:ProgressPreference = 'SilentlyContinue'  # Must be Global for PowerShell to respect it
-$scriptVersion = '1.0.0.0.55'
+$scriptVersion = '1.0.0.0.56'
 $psVersionMinVersion = '7.2'
 $downloadTokenLength = 32
 $minimumVcenterRelease = '7.0'
@@ -3173,6 +3288,9 @@ if ($Silence) {
 switch ($true) {
     $check {
     Show-DepotConfiguration
+    }
+    $collectLogs {
+        Invoke-CollectLogs | Out-Null
     }
     $connect {
         if ((-not $jsonInput) -or (-not $endpoint)) {

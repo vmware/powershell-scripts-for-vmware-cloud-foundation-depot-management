@@ -64,5 +64,5 @@ See [LICENSE.md](LICENSE.md) for license information.
 
 ---
 
-**Copyright © 2025 Broadcom. All Rights Reserved.**
+**Copyright © 2026 Broadcom. All Rights Reserved.**
 
