@@ -2,7 +2,7 @@
 
 * Added "-CollectLogs" feature.
 * Fixed bug which caused only the last of four depots to be created in clean-slate environments (reported scenario: vCenter 8.0 U3g after `updatemgr-utility.py reset-db`).
-* Fixed issue three `return` statements inside the depot create loop changed to `continue` so that a single depot failure does not abort processing of remaining depots.
+* Fixed issue three `return` statements inside the depot create loop changed to `continue` so that a single depot failure does not abort processing of remaining depots. Thanks to @i3laze for the bug report
 * Stale depot deletion failures now skip create rather than silently leaving the environment in a broken state; `$allDepots` is refreshed after each successful deletion to prevent stale state re-processing.
 * Fixed `Invoke-SyncDepotsAsync` wrapped in `try/catch` with null task ID check; sync failures are now reported as warnings rather than logged as success
 
