@@ -33,7 +33,7 @@
 #
 # This script is intended to help users transition to the new VMware by Broadcom depot structures.
 #
-# Last modified: 2026-06-10
+# Last modified: 2026-06-15
 # KB: https://knowledge.broadcom.com/external/article/389276
 #
 Param (
@@ -83,6 +83,10 @@ $Script:ExitCodes = @{
 
 # Set log level from parameter
 $Script:configuredLogLevel = $logLevel
+
+# Initialize interactive-menu state variables to avoid StrictMode errors on first access.
+$Script:DownloadTokenMenuInterface = $null
+$Script:SkipVcenterEnabled = $false
 
 Function Show-PowerCliWebOperationTimeOut {
     [CmdletBinding()]
@@ -382,11 +386,11 @@ Function Write-LogMessage {
     if (-not $suppressOutputToFile) {
         $logContent = '[' + $timeStamp + '] ' + '(' + $type + ')' + ' ' + $message
         try {
-            Add-Content -Path $logFile -Value $logContent -ErrorAction Stop
+            Add-Content -Path $Script:LogFile -Value $logContent -ErrorAction Stop
         }
         catch {
             # Handle log file write failures gracefully
-            Write-Host "Failed to add content to log file $logFile." -ForegroundColor Red
+            Write-Host "Failed to add content to log file $Script:LogFile." -ForegroundColor Red
             Write-Host $_.Exception.Message
         }
     }
@@ -409,13 +413,13 @@ Function New-LogFile {
     # create one log file for each day the script is run.
     $fileTimeStamp = Get-Date -Format "MM-dd-yyyy"
     $Script:LogFolder = Join-Path -Path $PSScriptRoot -ChildPath 'logs'
-    $Script:LogFile = Join-Path -Path $logFolder -ChildPath "DepotChange-$fileTimeStamp.log"
-    $logFolderExists = Test-Path $logFolder
+    $Script:LogFile = Join-Path -Path $Script:LogFolder -ChildPath "DepotChange-$fileTimeStamp.log"
+    $logFolderExists = Test-Path $Script:LogFolder
 
     if (-not $logFolderExists) {
-        Write-Host "LogFolder not found, creating $logFolder" -ForegroundColor Yellow;
+        Write-Host "LogFolder not found, creating $Script:LogFolder" -ForegroundColor Yellow;
         try {
-            New-Item -ItemType Directory -Path $logFolder -ErrorAction Stop | Out-Null
+            New-Item -ItemType Directory -Path $Script:LogFolder -ErrorAction Stop | Out-Null
         } catch {
             Write-LogMessage -Type ERROR -Message "Failed to create log directory. Exiting."
             Exit-WithCode -exitCode $Script:ExitCodes.GENERAL_ERROR -message "Failed to create log directory"
@@ -423,8 +427,8 @@ Function New-LogFile {
     }
 
     # Create the log file if not already present.
-    if (-not (Test-Path $logFile)) {
-        New-Item -type File -Path $logFile | Out-Null
+    if (-not (Test-Path $Script:LogFile)) {
+        New-Item -type File -Path $Script:LogFile | Out-Null
         Get-EnvironmentSetup
     }
 }
@@ -692,7 +696,7 @@ Function Test-EndPointConnections {
         }
     }
     # Non-SDDC Managed controlled environments.
-    if (-not $Script:SkipVcenter) {
+    if (-not $Script:SkipVcenterEnabled) {
         $viServers = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
         if (-not $viServers -or -not (($viServers | Where-Object IsConnected).Name)) {
             if (-not $Script:Headless) {
@@ -1405,8 +1409,8 @@ Function Invoke-SddcManagerPropertyFilesConfig {
     }
     $remoteSddcManagerLcmPropertiesFile="/opt/vmware/vcf/lcm/lcm-app/conf/application-prod.properties"
     $remoteSddcManagerOperationPropertiesFile="/etc/vmware/vcf/operationsmanager/application.properties"
-    $localSddcManagerPropertiesFile = Join-Path -Path $logFolder -ChildPath "$sddcManagerVmName-lcm-app-application-prod.properties"
-    $localSddcManagerOperationPropertiesFile = Join-Path -Path $logFolder -ChildPath "$sddcManagerVmName-operationsmanager-application.properties"
+    $localSddcManagerPropertiesFile = Join-Path -Path $Script:LogFolder -ChildPath "$sddcManagerVmName-lcm-app-application-prod.properties"
+    $localSddcManagerOperationPropertiesFile = Join-Path -Path $Script:LogFolder -ChildPath "$sddcManagerVmName-operationsmanager-application.properties"
 
     $depotLcmManifestDir="lcm.depot.adapter.remote.lcmManifestDir"
     $depotLcmProductVersionCatalogDir="lcm.depot.adapter.remote.lcmProductVersionCatalogDir"
@@ -2361,7 +2365,7 @@ Function Set-DepotConfiguration {
         Invoke-CheckUrl -UrlType "SDDC Manager Depot" -Url "https://$($depotConfig.DepotFqdn)$($depotConfig.SddcManagerBasePath)$($depotConfig.SddcManagerRepoDir)/index.v3" -Credential $sddcManagerMockCredential
     }
 
-    if (-not $Script:SkipVcenter) {
+    if (-not $Script:SkipVcenterEnabled) {
         foreach ($depot in $hostDepotArray) {
             Invoke-CheckUrl -UrlType "ESX Host Depot" -Url $($depot.Url) -Message $($depot.Description)
         }
@@ -2376,7 +2380,7 @@ Function Set-DepotConfiguration {
         return
     }
 
-    if (-not $Script:SkipVcenter) {
+    if (-not $Script:SkipVcenterEnabled) {
         Write-LogMessage -Type INFO -AppendNewLine -Message "Beginning depot update operations..."
 
         $vcenterConnections = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global
@@ -2539,7 +2543,7 @@ Function Connect-Vcenter {
     Write-LogMessage -Type DEBUG -Message "Entered Connect-Vcenter for $serverType '$serverName'"
 
     # Check if we're already connected to this vCenter to avoid duplicate connections
-    $connectedVcenter = $Global:DefaultViServers | Where-Object {$_.name -eq $serverName -and $_.IsConnected}
+    $connectedVcenter = Get-Variable -Name DefaultViServers -ValueOnly -ErrorAction SilentlyContinue -Scope Global | Where-Object {$_.name -eq $serverName -and $_.IsConnected}
 
     if (-not $connectedVcenter) {
         # Attempt to establish a new connection with progress indicator
@@ -3219,11 +3223,11 @@ Function Show-MainMenu {
             }
             8
             {
-                if ($Script:SkipVcenter) {
-                    Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
+                if ($Script:SkipVcenterEnabled) {
+                    $Script:SkipVcenterEnabled = $false
                     Write-LogMessage -Type INFO -Message "Disabling SkipVcenter mode."
                 } else {
-                    $Script:SkipVcenter=$true
+                    $Script:SkipVcenterEnabled = $true
                     Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
                 }
                 Show-AnyKey
@@ -3258,7 +3262,7 @@ Function Show-MainMenu {
 # Variables and Constants
 $Script:ConfirmPreference = "None"
 $Global:ProgressPreference = 'SilentlyContinue'  # Must be Global for PowerShell to respect it
-$scriptVersion = '1.0.0.0.56'
+$scriptVersion = '1.0.0.0.57'
 $psVersionMinVersion = '7.2'
 $downloadTokenLength = 32
 $minimumVcenterRelease = '7.0'
@@ -3376,10 +3380,10 @@ switch ($true) {
         switch ($skipVcenter) {
             "Enable" {
                 Write-LogMessage -Type INFO -Message "Enabling SkipVcenter mode."
-                $Script:SkipVcenter = $true
+                $Script:SkipVcenterEnabled = $true
             }
             "Disable" {
-                Remove-Variable -ErrorAction SilentlyContinue -Name SkipVcenter -Scope Script
+                $Script:SkipVcenterEnabled = $false
                 Write-LogMessage -Type INFO -Message "Disabling SkipVcenter mode."
             }
             Default {
