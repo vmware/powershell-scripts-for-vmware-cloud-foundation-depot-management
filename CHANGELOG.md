@@ -1,3 +1,7 @@
+## 1.0.0.0.57
+
+* Fixed StrictMode regressions. Thanks to @i3laze for the bug report
+
 ## 1.0.0.0.56
 
 * Added "-CollectLogs" feature.
